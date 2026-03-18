@@ -45,6 +45,7 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
 - **Component Modularity**: Focused on writing clean, modular, and well-commented React components for future scalability.
 - **Component Routing**: Fixed an issue causing a blank screen ("white screen of death") by ensuring all global components (`Navbar`, `NoiseOverlay`, `Home`) remained imported correctly inside `App.jsx` during standard routing structure updates.
+- **Version Control**: Implemented Git Version Control and optimized repository by excluding dependency folders.
 
 ## 5. Next Steps
 - Filling out specific topic contents with real physics revision materials inside the accordions.
