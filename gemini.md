@@ -20,6 +20,7 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 ### 3.1. Core Layout & Navigation
 - **Sidebar & Dashboard**: A collapsible sidebar navigation system that houses links to various areas of the VLE. The main dashboard displays the available courses.
 - **Dark Mode**: Fully integrated dark theme UI mimicking modern software platforms.
+- **Global Search Bar**: Upgraded the `Navbar` with a premium glassmorphic search input featuring a neon glow focus state, micro-interactions, and `searchTerm` state management for future content filtering.
 
 ### 3.2. Course Pages (A-Level Physics Route)
 - **Top Information Block**: Features a welcome banner, quick links, and a summary of exam board details and learning hours.
@@ -33,12 +34,20 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 
 ### 3.3. Authentication & Backend Setup
 - **Supabase Integration**: Connected the frontend to a Supabase backend project.
+- **Database Schema**: Designed a comprehensive relational database schema to manage user profiles, access levels, hierarchical course content (modules, lessons, quizzes), and student progress tracking.
 - **Security**: Configured strict security rules and generated necessary client files for communication.
 - **Login/Signup Page**: Scaffolded a custom authentication UI that matches the dark aesthetic of the site. It features deep dark mode styling, a glassmorphic primary container, glowing neon edge borders upon input focus, and GSAP entrance animations.
 - **Micro-interactions**: Added responsive `lucide-react` icons that cycle their color state based on focus, and dynamic GSAP error-shake animations when authentication fails.
 - **Focus Mode**: Structured advanced routing in `App.jsx` to strip away the Navbar and Footer to eliminate cognitive friction when on the `/auth` route.
 - **Password Recovery**: Implemented a complete "Forgot Password" flow within `Auth.jsx` utilizing `supabase.auth.resetPasswordForEmail`, and built a dedicated `UpdatePassword.jsx` route to securely override the password.
 - **Environment Variables**: API keys (e.g., `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) are securely stored in a `.env.local` file.
+
+### 3.4. Backend Architecture Phase Completion
+- **Schema Deployment**: The custom 6-tier Edexcel PostgreSQL schema (Courses -> Chapters -> Topics -> Subtopics -> Assessment Points -> Resources) has been successfully executed in Supabase.
+- **System Verification**: All tables are verified in the database. The Row Level Security (RLS) policies are active.
+- **Event Trigger Confirmed**: The Supabase Authentication trigger was manually tested and is successfully auto-generating new rows in the `profiles` table with the default 'Free' access tier upon user sign-up.
+- **Safe Storage**: The master SQL architecture script has been successfully downloaded and archived locally as `Alsini_Physics_Schema_V1.sql`.
+- **Current Directive**: The Supabase project is now entering a planned, inactive pause to save resources.
 
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
