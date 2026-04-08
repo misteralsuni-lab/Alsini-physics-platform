@@ -47,6 +47,7 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **System Verification**: All tables are verified in the database. The Row Level Security (RLS) policies are active.
 - **Event Trigger Confirmed**: The Supabase Authentication trigger was manually tested and is successfully auto-generating new rows in the `profiles` table with the default 'Free' access tier upon user sign-up.
 - **Safe Storage**: The master SQL architecture script has been successfully downloaded and archived locally as `Alsini_Physics_Schema_V1.sql`.
+- **Data Seeding Prep**: Engineered a scalable PostgreSQL CTE migration script to seed the database with the Edexcel 4PH1 Section 1 (Forces and Motion) curriculum hierarchy.
 - **Current Directive**: The Supabase project is now entering a planned, inactive pause to save resources.
 
 ## 4. Troubleshooting & Architecture Changes
