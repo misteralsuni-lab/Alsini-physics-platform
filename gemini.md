@@ -42,13 +42,17 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Password Recovery**: Implemented a complete "Forgot Password" flow within `Auth.jsx` utilizing `supabase.auth.resetPasswordForEmail`, and built a dedicated `UpdatePassword.jsx` route to securely override the password.
 - **Environment Variables**: API keys (e.g., `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) are securely stored in a `.env.local` file.
 
-### 3.4. Backend Architecture Phase Completion
-- **Schema Deployment**: The custom 6-tier Edexcel PostgreSQL schema (Courses -> Chapters -> Topics -> Subtopics -> Assessment Points -> Resources) has been successfully executed in Supabase.
-- **System Verification**: All tables are verified in the database. The Row Level Security (RLS) policies are active.
-- **Event Trigger Confirmed**: The Supabase Authentication trigger was manually tested and is successfully auto-generating new rows in the `profiles` table with the default 'Free' access tier upon user sign-up.
-- **Safe Storage**: The master SQL architecture script has been successfully downloaded and archived locally as `Alsini_Physics_Schema_V1.sql`.
-- **Data Seeding Prep**: Engineered a scalable PostgreSQL CTE migration script to seed the database with the Edexcel 4PH1 Section 1 (Forces and Motion) curriculum hierarchy.
-- **Current Directive**: The Supabase project is now entering a planned, inactive pause to save resources.
+### 3.4. Legacy Backend Architecture
+- **Initial Setup**: Initially designed a 6-tier schema (`courses -> chapters -> topics -> subtopics...`). This was later dropped to reduce technical debt in favor of a simpler hierarchy.
+- **Event Trigger Confirmed**: The Supabase Authentication trigger was manually tested and successfully auto-generates new rows in the `profiles` table with the default 'Free' access tier upon user sign-up.
+- **Safe Storage**: The master SQL architecture script was archived locally as `Alsini_Physics_Schema_V1.sql`.
+
+### 3.5. SaveMyExams Schema Migration & Security Rollout
+- **Unified Schema Deployment**: Migrated to a highly scalable hierarchy mimicking SaveMyExams, modeling the Edexcel IGCSE syllabus structure with a corrected terminology mapping: `units -> chapters -> specification_points -> activities/resources/questions`.
+- **Data Seeding Completed**: Successfully parsed an SOW mapping and bulk-inserted the entire Edexcel curriculum data into the unified database schema via direct, chunked SQL migrations, accurately preserving referential integrity and circumventing duplicative key constraints.
+- **Row Level Security (RLS) Enforcement**: Enforced strict RLS policies on all core curriculum tables. Explicit `SELECT` policies authorize only `authenticated` users, mathematically blocking anonymous access (verified via isolated NodeJS script `test_rls.js`).
+- **Frontend Authentication Audit**: Completed a formal security review of `Auth.jsx`. Confirmed safe default error handling, secure token persistence via `@supabase/supabase-js`, and passive mitigation against XSS/CSRF threats.
+- **Quality Gate Approved**: The Security Architect provided official, formal system sign-off verifying that backend security is production-ready for frontend integration.
 
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
@@ -58,5 +62,6 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Version Control**: Implemented Git Version Control and optimized repository by excluding dependency folders.
 
 ## 5. Next Steps
-- Filling out specific topic contents with real physics revision materials inside the accordions.
-- Creating the core dashboard logic to pull a user's data after they have logged in via the new authentication page.
+- **Phase 2 - Front-End Integration**: Move immediately into building the EDU-VLE Dashboard. This involves scaffolding a clean, dark-mode component architecture to dynamically fetch and display the newly structured curriculum data.
+- **Dynamic Sidebar Components**: Implement sidebar components that leverage the `units -> chapters -> specification_points` tracking for fluid course navigation.
+- **Interactive UI**: Develop the PDF embed components and a toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.
