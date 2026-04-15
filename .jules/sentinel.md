@@ -1,0 +1,4 @@
+## 2024-04-15 - [Secure Component Defaults: Target Blank Tabnabbing]
+**Vulnerability:** External links (`target="_blank"`) without `rel="noopener noreferrer"` can expose the site to reverse tabnabbing (window.opener hijacking), potentially allowing the newly opened tab to redirect the original application page to a malicious site.
+**Learning:** Shared UI components, like the `<Button>` component which acts as a generic link wrapper, can silently propagate this vulnerability throughout the application if not designed securely.
+**Prevention:** Build secure defaults directly into reusable UI components. For instance, the `Button` component now automatically intercepts `target="_blank"` props and seamlessly appends the necessary `rel="noopener noreferrer"` attributes, mitigating the risk application-wide without requiring conscious developer effort per link.
