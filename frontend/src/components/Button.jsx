@@ -27,6 +27,12 @@ export default function Button({ children, className = '', variant = 'accent', o
         </>
     );
 
+    // Security: Prevent reverse tabnabbing for external links
+    let finalRel = rel;
+    if (target === '_blank') {
+        finalRel = rel ? `${rel} noopener noreferrer` : "noopener noreferrer";
+    }
+
     if (href) {
         return (
             <a
@@ -34,7 +40,7 @@ export default function Button({ children, className = '', variant = 'accent', o
                 style={style}
                 href={href}
                 target={target}
-                rel={rel}
+                rel={finalRel}
                 className={`${baseClasses} ${variantClasses} group ${className}`}
             >
                 {content}
