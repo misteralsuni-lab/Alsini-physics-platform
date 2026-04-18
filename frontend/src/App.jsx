@@ -11,6 +11,7 @@ import CTA from './components/CTA';
 import Footer from './components/Footer';
 import Auth from './components/Auth';
 import UpdatePassword from './components/UpdatePassword';
+import VLEDashboard from './components/VLEDashboard';
 
 const Home = () => (
   <>
@@ -24,20 +25,26 @@ const Home = () => (
 const AppContent = ({ session }) => {
   const location = useLocation();
   const isAuthPage = location.pathname === '/auth' || location.pathname === '/update-password';
+  const isDashboard = location.pathname.startsWith('/dashboard');
+  const hideGlobalNavAndFooter = isAuthPage || isDashboard;
 
   return (
-    <main className="relative min-h-screen bg-background selection:bg-accent-purple/30 selection:text-white">
+    <main className="relative min-h-screen bg-[#050505] selection:bg-accent-purple/30 selection:text-white">
       <NoiseOverlay />
-      {!isAuthPage && <Navbar session={session} />}
+      {!hideGlobalNavAndFooter && <Navbar session={session} />}
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={session ? <Navigate to="/dashboard" replace /> : <Home />} />
         <Route 
           path="/auth" 
-          element={session ? <Navigate to="/" replace /> : <Auth />} 
+          element={session ? <Navigate to="/dashboard" replace /> : <Auth />} 
         />
         <Route path="/update-password" element={<UpdatePassword />} />
+        <Route 
+          path="/dashboard/*" 
+          element={session ? <VLEDashboard session={session} /> : <Navigate to="/auth" replace />} 
+        />
       </Routes>
-      {!isAuthPage && <Footer />}
+      {!hideGlobalNavAndFooter && <Footer />}
     </main>
   );
 };

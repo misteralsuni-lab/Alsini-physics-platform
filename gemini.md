@@ -54,6 +54,11 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Frontend Authentication Audit**: Completed a formal security review of `Auth.jsx`. Confirmed safe default error handling, secure token persistence via `@supabase/supabase-js`, and passive mitigation against XSS/CSRF threats.
 - **Quality Gate Approved**: The Security Architect provided official, formal system sign-off verifying that backend security is production-ready for frontend integration.
 
+### 3.6. EDU-VLE Dashboard Integration (Phase 2 Complete)
+- **Master Layout**: Constructed `VLEDashboard.jsx` as a fluid desktop-style layout utilizing a premium, deep-dark immersive aesthetic (`#050505` backgrounds, `#0A0A0A` cards, and translucent `white/5` glassmorphic borders) calibrated to reduce eye strain.
+- **Platform Rebranding**: Successfully rebranded the core application interface and visual identity to **EDU-VLE**.
+- **Dynamic Curriculum Sidebar**: Built `Sidebar.jsx` with asynchronous wiring directly to Supabase. It natively parses the unified schema and is configured to sort syllabus components chronologically to maintain referential parity.
+- **Triple Science Filtering**: Developed a sleek, high-tech boolean toggle switch to intuitively filter out `is_physics_only = true` specification points, seamlessly rendering targeted curriculum pathways on demand.
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
@@ -62,6 +67,5 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Version Control**: Implemented Git Version Control and optimized repository by excluding dependency folders.
 
 ## 5. Next Steps
-- **Phase 2 - Front-End Integration**: Move immediately into building the EDU-VLE Dashboard. This involves scaffolding a clean, dark-mode component architecture to dynamically fetch and display the newly structured curriculum data.
-- **Dynamic Sidebar Components**: Implement sidebar components that leverage the `units -> chapters -> specification_points` tracking for fluid course navigation.
+- **Phase 3 - The Interactive AI Tutor Interface**: Move immediately into building the Interactive AI Tutor Interface.
 - **Interactive UI**: Develop the PDF embed components and a toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.
