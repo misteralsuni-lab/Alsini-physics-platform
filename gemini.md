@@ -59,6 +59,12 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Platform Rebranding**: Successfully rebranded the core application interface and visual identity to **EDU-VLE**.
 - **Dynamic Curriculum Sidebar**: Built `Sidebar.jsx` with asynchronous wiring directly to Supabase. It natively parses the unified schema and is configured to sort syllabus components chronologically to maintain referential parity.
 - **Triple Science Filtering**: Developed a sleek, high-tech boolean toggle switch to intuitively filter out `is_physics_only = true` specification points, seamlessly rendering targeted curriculum pathways on demand.
+
+### 3.7. Interactive AI Tutor & Backend Integration (Phase 3 & 4 Complete)
+- **Frontend Chat UI**: Built `InteractiveTutor.jsx`, a responsive split-screen interface featuring a glassmorphic document viewer and a dedicated, scrollable AI chat panel matching the EDU-VLE deep-dark aesthetic.
+- **Node.js Express Backend**: Designed and deployed a secure custom backend server (`server.js`) to act as a bridge and handle state.
+- **Gemini AI Integration**: Secured the Gemini API key via environment variables and configured the Gemini 2.5 Flash model with a custom overarching Socratic Physics Tutor persona.
+- **Full End-to-End Wiring**: Successfully connected the React frontend directly to the new Node.js `/api/chat` endpoint. The AI Tutor is now fully alive, communicating, and safely handling user histories without client-side API exposure.
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
@@ -67,5 +73,5 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Version Control**: Implemented Git Version Control and optimized repository by excluding dependency folders.
 
 ## 5. Next Steps
-- **Phase 3 - The Interactive AI Tutor Interface**: Move immediately into building the Interactive AI Tutor Interface.
-- **Interactive UI**: Develop the PDF embed components and a toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.
+- **Phase 5 - UI Overhaul**: Implement retractable side panels and a full-width document viewer to maximize reading space and enhance the learning layout.
+- **Interactive Resources**: Continue developing the dynamic PDF embed components and the toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.

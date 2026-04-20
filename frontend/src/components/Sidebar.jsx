@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { ChevronDown, ChevronRight, BookOpen, FlaskConical, Loader2, LogOut } from 'lucide-react';
+import { ChevronDown, ChevronRight, BookOpen, FlaskConical, Loader2, LogOut, Menu, ChevronLeft } from 'lucide-react';
 
 const Sidebar = () => {
   const [units, setUnits] = useState([]);
@@ -9,6 +9,7 @@ const Sidebar = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [expandedUnits, setExpandedUnits] = useState({});
   const [isPhysicsOnly, setIsPhysicsOnly] = useState(true);
+  const [isOpen, setIsOpen] = useState(true);
 
   useEffect(() => {
     fetchSyllabusData();
@@ -67,21 +68,40 @@ const Sidebar = () => {
   };
 
   return (
-    <aside className="w-80 flex-shrink-0 border-r border-white/5 bg-[#0A0A0A] flex flex-col h-full z-10 shadow-2xl relative">
-      {/* Brand Header */}
-      <div className="p-6 border-b border-white/5">
-        <Link to="/" className="flex items-center gap-3 group">
-          <div className="relative">
-            <div className="absolute inset-0 bg-accent-cyan opacity-20 blur-md rounded-full group-hover:opacity-40 transition-opacity"></div>
-            <div className="w-10 h-10 rounded-xl bg-white/5 border border-accent-cyan/30 flex items-center justify-center relative z-10 transition-colors group-hover:border-accent-cyan/60">
-              <span className="font-drama text-2xl text-accent-cyan">E</span>
+    <>
+      {/* Floating Toggle Button when Sidebar is closed */}
+      {!isOpen && (
+        <button 
+          onClick={() => setIsOpen(true)}
+          className="absolute top-6 left-6 z-50 p-2.5 bg-[#0A0A0A] border border-white/10 rounded-xl text-gray-400 hover:text-white transition-all shadow-[0_0_20px_rgba(0,0,0,0.5)] group hover:border-accent-cyan/30"
+          aria-label="Open Sidebar"
+        >
+          <Menu size={20} className="group-hover:scale-110 transition-transform" />
+        </button>
+      )}
+
+      <aside className={`w-80 flex-shrink-0 border-r border-white/5 bg-[#0A0A0A] flex flex-col h-full z-40 shadow-2xl relative transition-all duration-300 ${isOpen ? 'translate-x-0 ml-0' : '-translate-x-full -ml-80'}`}>
+        {/* Brand Header */}
+        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-3 group">
+            <div className="relative">
+              <div className="absolute inset-0 bg-accent-cyan opacity-20 blur-md rounded-full group-hover:opacity-40 transition-opacity"></div>
+              <div className="w-10 h-10 rounded-xl bg-white/5 border border-accent-cyan/30 flex items-center justify-center relative z-10 transition-colors group-hover:border-accent-cyan/60">
+                <span className="font-drama text-2xl text-accent-cyan">E</span>
+              </div>
             </div>
-          </div>
-          <span className="font-sans font-bold text-xl tracking-tight text-white">
-            EDU<span className="text-accent-cyan">-VLE</span>
-          </span>
-        </Link>
-      </div>
+            <span className="font-sans font-bold text-xl tracking-tight text-white">
+              EDU<span className="text-accent-cyan">-VLE</span>
+            </span>
+          </Link>
+          <button 
+            onClick={() => setIsOpen(false)}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            aria-label="Close Sidebar"
+          >
+            <ChevronLeft size={20} />
+          </button>
+        </div>
 
       {/* Sleek Triple Science Toggle */}
       <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
@@ -178,6 +198,7 @@ const Sidebar = () => {
          </button>
       </div>
     </aside>
+   </>
   );
 };
 

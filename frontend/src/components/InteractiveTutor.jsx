@@ -1,34 +1,106 @@
-import React, { useState } from 'react';
-import { Send, FileText, Bot, User } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Send, FileText, Bot, User, X, ChevronLeft } from 'lucide-react';
 
 const InteractiveTutor = () => {
   const [messages, setMessages] = useState([
     { id: 1, role: 'ai', text: 'Hello! I am your AI Physics Tutor. How can I help you with this topic?' }
   ]);
   const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isTutorOpen, setIsTutorOpen] = useState(false);
+  const messagesEndRef = useRef(null);
 
-  const handleSend = (e) => {
+  // Auto-scroll to the bottom when new messages or loading state appears
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
+
+  const handleSend = async (e) => {
     e.preventDefault();
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || isLoading) return;
 
-    // Add user message
-    const newUserMsg = { id: Date.now(), role: 'user', text: inputValue };
+    const userMessageText = inputValue;
+    
+    // 1. Add user message to UI
+    const newUserMsg = { id: Date.now(), role: 'user', text: userMessageText };
     setMessages((prev) => [...prev, newUserMsg]);
     setInputValue('');
+    setIsLoading(true);
 
-    // Placeholder AI response simulation
-    setTimeout(() => {
+    // 2. Format history for Gemini Backend
+    // Gemini API requires history to start with a "user" message.
+    // We filter out the initial local ai greeting (id: 1) before sending.
+    const formattedHistory = messages
+      .filter(msg => msg.id !== 1)
+      .map(msg => ({
+        role: msg.role === 'ai' ? 'model' : 'user',
+        parts: [{ text: msg.text }]
+      }));
+
+    try {
+      // 3. Make real fetch call to the new Express backend
+      const response = await fetch('http://localhost:5000/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          history: formattedHistory,
+          message: userMessageText
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+
+      const data = await response.json();
+
+      // Append successfully received message
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, role: 'ai', text: 'This is a simulated response. In production, this will connect to the OpenKB/MinerU processed context.' }
+        { id: Date.now() + 1, role: 'ai', text: data.response }
       ]);
-    }, 1000);
+      
+    } catch (error) {
+      console.error('Failed to fetch from backend:', error);
+      // 4. Error Handling: add a styled error message
+      setMessages((prev) => [
+        ...prev,
+        { 
+          id: Date.now() + 1, 
+          role: 'ai', 
+          text: 'Connection error: I am currently unable to reach the neural network. Please try again.', 
+          isError: true 
+        }
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="h-full w-full flex flex-col xl:flex-row gap-6 p-6">
-      {/* Left Pane: Document Viewer (60-70% width on large screens) */}
-      <div className="flex-[2] xl:flex-[2.5] bg-[#0A0A0A] border border-white/5 rounded-2xl flex flex-col overflow-hidden relative shadow-[0_8px_30px_rgb(0,0,0,0.5)]">
+    <div className="h-full w-full flex p-6 relative overflow-hidden">
+      
+      {/* Floating Action Button (Ask Tutor) */}
+      {!isTutorOpen && (
+        <button 
+          onClick={() => setIsTutorOpen(true)}
+          className="absolute top-1/2 -translate-y-1/2 right-0 z-40 flex items-center gap-2 bg-[#0A0A0A] border border-y-white/10 border-l-white/10 border-r-0 p-3 pr-4 rounded-l-2xl shadow-[0_0_20px_rgba(16,185,129,0.2)] text-emerald-400 hover:text-emerald-300 hover:bg-[#111] transition-all group"
+          aria-label="Open AI Tutor"
+        >
+          <Bot className="w-5 h-5 group-hover:scale-110 transition-transform" />
+          <span className="font-medium font-sans text-sm tracking-wide">Ask Tutor</span>
+          <ChevronLeft className="w-4 h-4 ml-1 opacity-50 group-hover:-translate-x-1 transition-all" />
+        </button>
+      )}
+
+      {/* Main Pane: Document Viewer */}
+      <div className="flex-1 w-full bg-[#0A0A0A] border border-white/5 rounded-2xl flex flex-col overflow-hidden relative shadow-[0_8px_30px_rgb(0,0,0,0.5)]">
          {/* Glassmorphic Header */}
          <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md z-10 flex items-center justify-between">
            <div className="flex items-center gap-3">
@@ -63,20 +135,31 @@ const InteractiveTutor = () => {
          </div>
       </div>
 
-      {/* Right Pane: AI Chat Interface */}
-      <div className="flex-[1] xl:flex-[1.5] w-full max-w-2xl mx-auto xl:mx-0 xl:max-w-none bg-[#0A0A0A] border border-white/5 rounded-2xl flex flex-col overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.5)]">
+      {/* Right Pane: AI Chat Drawer */}
+      <div className={`absolute top-0 right-0 h-full w-full sm:w-[450px] bg-[#0A0A0A] border-l border-white/5 flex flex-col overflow-hidden shadow-[-10px_0_30px_rgba(0,0,0,0.7)] z-50 transition-transform duration-300 ${isTutorOpen ? 'translate-x-0' : 'translate-x-full'}`}>
          {/* Chat Header */}
-         <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md flex items-center gap-3 z-10">
-            <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
-               <Bot className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div>
-               <h3 className="text-gray-200 font-medium font-drama">Interactive Tutor</h3>
-               <div className="flex items-center gap-2 mt-0.5">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse hidden sm:block"></div>
-                  <span className="text-[10px] uppercase tracking-wider text-emerald-500/80 font-medium">Session Active</span>
+         <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md flex items-center justify-between z-10">
+            <div className="flex items-center gap-3">
+               <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
+                  <Bot className="w-5 h-5 text-emerald-400" />
+               </div>
+               <div>
+                  <h3 className="text-gray-200 font-medium font-drama">Interactive Tutor</h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                     <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'} shadow-sm`}></div>
+                     <span className={`text-[10px] uppercase tracking-wider ${isLoading ? 'text-amber-500' : 'text-emerald-500/80'} font-medium transition-colors`}>
+                       {isLoading ? 'Processing...' : 'Session Active'}
+                     </span>
+                  </div>
                </div>
             </div>
+            <button 
+              onClick={() => setIsTutorOpen(false)}
+              className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-white/10"
+              aria-label="Close Tutor Drawer"
+            >
+              <X className="w-5 h-5" />
+            </button>
          </div>
 
          {/* Message History Container */}
@@ -85,18 +168,35 @@ const InteractiveTutor = () => {
             
             <div className="relative z-10 space-y-6 flex flex-col">
               {messages.map((msg) => (
-                <div key={msg.id} className={`flex gap-3 max-w-[90%] sm:max-w-[85%] ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
-                  <div className={`w-8 h-8 rounded-full flex justify-center items-center shrink-0 ${msg.role === 'user' ? 'bg-blue-600/20 border border-blue-500/30 shadow-[0_0_15px_rgba(37,99,235,0.2)]' : 'bg-[#151515] border border-white/10'}`}>
-                      {msg.role === 'user' ? <User className="w-4 h-4 text-blue-400" /> : <Bot className="w-4 h-4 text-emerald-400" />}
-                  </div>
-                  <div className={`p-4 text-sm leading-relaxed shadow-sm font-light tracking-wide
-                    ${msg.role === 'user' 
-                      ? 'bg-[#111]/80 backdrop-blur-sm border-blue-500/20 border text-blue-50/90 rounded-2xl rounded-tr-sm' 
-                      : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm'}`}>
-                      {msg.text}
-                  </div>
-                </div>
+                 <div key={msg.id} className={`flex gap-3 max-w-[90%] sm:max-w-[85%] ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
+                   <div className={`w-8 h-8 rounded-full flex justify-center items-center shrink-0 ${msg.role === 'user' ? 'bg-blue-600/20 border border-blue-500/30 shadow-[0_0_15px_rgba(37,99,235,0.2)]' : (msg.isError ? 'bg-red-500/10 border border-red-500/30' : 'bg-[#151515] border border-white/10')}`}>
+                       {msg.role === 'user' ? <User className="w-4 h-4 text-blue-400" /> : <Bot className={`w-4 h-4 ${msg.isError ? 'text-red-400' : 'text-emerald-400'}`} />}
+                   </div>
+                   <div className={`p-4 text-sm leading-relaxed shadow-sm font-light tracking-wide
+                     ${msg.role === 'user' 
+                       ? 'bg-[#111]/80 backdrop-blur-sm border-blue-500/20 border text-blue-50/90 rounded-2xl rounded-tr-sm' 
+                       : (msg.isError ? 'bg-red-500/5 backdrop-blur-sm border border-red-500/20 text-red-200 rounded-2xl rounded-tl-sm' : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm w-full')}`}>
+                       {msg.text}
+                   </div>
+                 </div>
               ))}
+              
+              {/* Typing Indicator */}
+              {isLoading && (
+                 <div className="flex gap-3 max-w-[90%] sm:max-w-[85%] mr-auto items-end animate-in fade-in zoom-in duration-300">
+                    <div className="w-8 h-8 rounded-full flex justify-center items-center shrink-0 bg-[#151515] border border-white/10">
+                        <Bot className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <div className="p-4 bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-sm flex items-center h-[52px]">
+                        <div className="flex gap-1.5 items-center">
+                            <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                            <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                            <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce"></div>
+                        </div>
+                    </div>
+                 </div>
+              )}
+              <div ref={messagesEndRef} />
             </div>
          </div>
 
@@ -107,14 +207,15 @@ const InteractiveTutor = () => {
                  type="text"
                  value={inputValue}
                  onChange={(e) => setInputValue(e.target.value)}
-                 placeholder="Ask your tutor a question..."
-                 className="w-full bg-[#111] border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-gray-200 text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-300 shadow-inner placeholder-gray-600 font-sans"
+                 disabled={isLoading}
+                 placeholder={isLoading ? "Tutor is writing..." : "Ask your tutor a question..."}
+                 className="w-full bg-[#111] border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-gray-200 text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-300 shadow-inner placeholder-gray-600 font-sans disabled:opacity-50 disabled:cursor-not-allowed"
                />
                <button
                  type="submit"
-                 disabled={!inputValue.trim()}
+                 disabled={!inputValue.trim() || isLoading}
                  className={`absolute right-2 p-2 rounded-lg transition-all duration-300 flex items-center justify-center 
-                  ${inputValue.trim() 
+                  ${inputValue.trim() && !isLoading
                     ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 hover:scale-105' 
                     : 'text-gray-600 opacity-50 cursor-not-allowed'}`}
                >
