@@ -65,6 +65,11 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Node.js Express Backend**: Designed and deployed a secure custom backend server (`server.js`) to act as a bridge and handle state.
 - **Gemini AI Integration**: Secured the Gemini API key via environment variables and configured the Gemini 2.5 Flash model with a custom overarching Socratic Physics Tutor persona.
 - **Full End-to-End Wiring**: Successfully connected the React frontend directly to the new Node.js `/api/chat` endpoint. The AI Tutor is now fully alive, communicating, and safely handling user histories without client-side API exposure.
+
+### 3.8. UI Overhaul (Phase 5 Complete)
+- **Collapsible Sidebar**: Implemented a responsive state-driven toggle for the left navigation panel (`Sidebar.jsx`). When closed, it visually slides off screen and fully releases its flexbox space, allowing the document viewer to expand dynamically. Added a floating `Menu` toggle button for smooth interaction.
+- **Sliding AI Tutor Drawer**: Refactored the AI Chat interface from a rigid split-screen into an absolute positioned drawer anchored to the right. Includes a stylized floating "Ask Tutor" action button with a neon aesthetic to trigger entry, maximizing main reading space while preserving immediate access to the AI.
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
@@ -73,5 +78,4 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Version Control**: Implemented Git Version Control and optimized repository by excluding dependency folders.
 
 ## 5. Next Steps
-- **Phase 5 - UI Overhaul**: Implement retractable side panels and a full-width document viewer to maximize reading space and enhance the learning layout.
 - **Interactive Resources**: Continue developing the dynamic PDF embed components and the toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.
