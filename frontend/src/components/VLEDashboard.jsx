@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import InteractiveTutor from './InteractiveTutor';
@@ -15,6 +15,8 @@ const DashboardHome = () => (
 
 
 const VLEDashboard = ({ session }) => {
+  const [activeTab, setActiveTab] = useState('Lesson');
+
   return (
     <div className="h-screen w-full flex bg-[#050505] overflow-hidden relative">
       {/* 
@@ -35,7 +37,7 @@ const VLEDashboard = ({ session }) => {
         <div className="flex-1 h-full overflow-y-auto styled-scrollbar">
            <Routes>
              <Route path="/" element={<div className="py-8 min-h-full"><DashboardHome /></div>} />
-             <Route path="/unit/:unitId/chapter/:chapterId" element={<InteractiveTutor />} />
+             <Route path="/unit/:unitId/chapter/:chapterId" element={<InteractiveTutor activeTab={activeTab} setActiveTab={setActiveTab} />} />
            </Routes>
         </div>
       </main>

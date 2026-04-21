@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, FileText, Bot, User, X, ChevronLeft } from 'lucide-react';
 
-const InteractiveTutor = () => {
+const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   const [messages, setMessages] = useState([
     { id: 1, role: 'ai', text: 'Hello! I am your AI Physics Tutor. How can I help you with this topic?' }
   ]);
@@ -60,10 +60,27 @@ const InteractiveTutor = () => {
 
       const data = await response.json();
 
+      let aiText = data.response || '';
+      
+      // Intercept navigation tag
+      const tabTracker = /\[SWITCH_TAB:\s*(.*?)\]/i;
+      const match = aiText.match(tabTracker);
+      
+      if (match && match[1]) {
+         const newTab = match[1].trim();
+         // Strip the tag from the text
+         aiText = aiText.replace(match[0], '').trim();
+         
+         // Trigger state change
+         if (setActiveTab) {
+            setActiveTab(newTab);
+         }
+      }
+
       // Append successfully received message
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, role: 'ai', text: data.response }
+        { id: Date.now() + 1, role: 'ai', text: aiText }
       ]);
       
     } catch (error) {
@@ -102,15 +119,28 @@ const InteractiveTutor = () => {
       {/* Main Pane: Document Viewer */}
       <div className="flex-1 w-full bg-[#0A0A0A] border border-white/5 rounded-2xl flex flex-col overflow-hidden relative shadow-[0_8px_30px_rgb(0,0,0,0.5)]">
          {/* Glassmorphic Header */}
-         <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md z-10 flex items-center justify-between">
+         <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
            <div className="flex items-center gap-3">
              <div className="p-2 bg-blue-500/10 rounded-lg">
                <FileText className="w-5 h-5 text-blue-400" />
              </div>
              <div>
-               <h3 className="text-gray-200 font-medium font-drama">Worksheet Preview</h3>
+               <h3 className="text-gray-200 font-medium font-drama">{activeTab} Preview</h3>
                <p className="text-xs text-gray-500">Awaiting OpenKB Extraction...</p>
              </div>
+           </div>
+           
+           {/* Tab Row */}
+           <div className="flex bg-[#111] border border-white/5 rounded-lg p-1">
+              {['Lesson', 'Worksheet', 'Simulation', 'Quiz'].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab && setActiveTab(tab)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === tab ? 'bg-[#222] text-white shadow-sm border border-white/10' : 'text-gray-500 hover:text-gray-300'}`}
+                >
+                  {tab}
+                </button>
+              ))}
            </div>
          </div>
 
