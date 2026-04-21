@@ -70,6 +70,12 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Collapsible Sidebar**: Implemented a responsive state-driven toggle for the left navigation panel (`Sidebar.jsx`). When closed, it visually slides off screen and fully releases its flexbox space, allowing the document viewer to expand dynamically. Added a floating `Menu` toggle button for smooth interaction.
 - **Sliding AI Tutor Drawer**: Refactored the AI Chat interface from a rigid split-screen into an absolute positioned drawer anchored to the right. Includes a stylized floating "Ask Tutor" action button with a neon aesthetic to trigger entry, maximizing main reading space while preserving immediate access to the AI.
 
+### 3.9. Agentic UI Copilot Integration (Phase 6 Complete)
+- **State-Lifted Navigation**: Refactored the dashboard to centrally manage `activeTab` states (`Lesson`, `Worksheet`, `Simulation`, `Quiz`), passing them down to the `InteractiveTutor` for synchronized rendering.
+- **AI Prompt Engineering**: Injected specialized system instructions into the backend (`server.js`), conditioning the Gemini model to output hidden tags (e.g., `[SWITCH_TAB: Quiz]`) whenever educational resources are invoked by the student.
+- **Frontend Regex Interceptor**: Built a message parser within `InteractiveTutor.jsx` that intercepts incoming AI responses, stealthily stripping the `[SWITCH_TAB]` tags before they reach the user. It then programmatically triggers the master dashboard state, resulting in a highly agentic interface that seamlessly navigates the UI on the student's behalf.
+- **Dynamic Tab Header**: Constructed a premium glassmorphic title and tab row inside the Document Viewer that syncs live with the active tab state to visually present the AI's capability.
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
