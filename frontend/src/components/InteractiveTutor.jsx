@@ -1,13 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, FileText, Bot, User, X, ChevronLeft } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { Send, FileText, Bot, User, X, ChevronLeft, Loader2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
+  const { chapterId } = useParams();
   const [messages, setMessages] = useState([
     { id: 1, role: 'ai', text: 'Hello! I am your AI Physics Tutor. How can I help you with this topic?' }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTutorOpen, setIsTutorOpen] = useState(false);
+  
+  // Data Fetching States
+  const [specPoints, setSpecPoints] = useState([]);
+  const [activeSpecPointId, setActiveSpecPointId] = useState(null);
+  const [worksheetResource, setWorksheetResource] = useState(null);
+  const [isFetchingResource, setIsFetchingResource] = useState(false);
+
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to the bottom when new messages or loading state appears
@@ -18,6 +29,60 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  // Fetch Specification Points for the Chapter
+  useEffect(() => {
+    const fetchSpecPoints = async () => {
+      if (!chapterId) return;
+      try {
+        const { data, error } = await supabase
+          .from('specification_points')
+          .select('*')
+          .eq('chapter_id', chapterId)
+          .order('created_at', { ascending: true });
+        
+        if (error) throw error;
+        setSpecPoints(data || []);
+        if (data && data.length > 0) {
+          setActiveSpecPointId(data[0].id);
+        }
+      } catch (error) {
+        console.error("Failed to fetch specification points:", error);
+      }
+    };
+    fetchSpecPoints();
+  }, [chapterId]);
+
+  // Fetch Resource when Worksheet Tab is active
+  useEffect(() => {
+    const fetchResource = async () => {
+      if (activeTab === 'Worksheet' && activeSpecPointId) {
+        setIsFetchingResource(true);
+        try {
+          const { data, error } = await supabase
+            .from('resources')
+            .select('*')
+            .eq('specification_point_id', activeSpecPointId)
+            .limit(1);
+
+          if (error) throw error;
+          
+          if (data && data.length > 0) {
+            setWorksheetResource(data[0]);
+          } else {
+            setWorksheetResource(null);
+          }
+        } catch (error) {
+          console.error("Failed to fetch worksheet resource:", error);
+          setWorksheetResource(null);
+        } finally {
+          setIsFetchingResource(false);
+        }
+      }
+    };
+    
+    fetchResource();
+  }, [activeTab, activeSpecPointId]);
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -144,23 +209,62 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
            </div>
          </div>
 
-         {/* Document Placeholder Body */}
-         <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
+         {/* Document Body Area */}
+         <div className="flex-1 flex flex-col relative overflow-hidden">
             {/* Subtle Gradient background effect */}
             <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#050505]/80 pointer-events-none" />
             
-            {/* Glass Box Placeholder */}
-            <div className="flex flex-col items-center gap-6 p-10 rounded-2xl border border-white/5 bg-white/[0.02] text-center max-w-md w-full z-10 shadow-lg relative overflow-hidden group">
-               {/* Shimmer Effect */}
-               <div className="absolute inset-0 -translate-x-[150%] bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-12 group-hover:animate-[shimmer_2s_infinite]"></div>
-               
-               <FileText className="w-16 h-16 text-gray-700 mx-auto" />
-               <div className="space-y-3 w-full">
-                  <div className="h-2 bg-white/5 rounded-full w-3/4 mx-auto"></div>
-                  <div className="h-2 bg-white/5 rounded-full w-full mx-auto"></div>
-                  <div className="h-2 bg-white/5 rounded-full w-5/6 mx-auto"></div>
-               </div>
-               <p className="text-gray-400 text-sm mt-4 font-light">Document will render here automatically when a dynamic resource is extracted.</p>
+            <div className="flex-1 overflow-y-auto z-10 styled-scrollbar relative">
+              {activeTab === 'Worksheet' ? (
+                isFetchingResource ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-4">
+                    <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                    <p className="text-gray-400 text-sm">Loading worksheet...</p>
+                  </div>
+                ) : worksheetResource ? (
+                  <div className="p-8 max-w-4xl mx-auto w-full prose prose-invert">
+                    <h1 className="text-3xl font-drama text-white mb-6 pb-4 border-b border-white/10">
+                      {worksheetResource.title}
+                    </h1>
+                    <div className="text-gray-300 leading-relaxed space-y-4">
+                       {/* Render markdown if available, fallback to simple text */}
+                       {worksheetResource.content_markdown ? (
+                         <ReactMarkdown>{worksheetResource.content_markdown}</ReactMarkdown>
+                       ) : worksheetResource.description ? (
+                         <ReactMarkdown>{worksheetResource.description}</ReactMarkdown>
+                       ) : (
+                         <p className="text-gray-400 italic">No detailed content available for this resource yet.</p>
+                       )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full p-8 text-center max-w-md mx-auto">
+                    <div className="p-4 bg-white/5 rounded-2xl mb-4 border border-white/5">
+                      <FileText className="w-12 h-12 text-gray-500" />
+                    </div>
+                    <h3 className="text-xl font-drama text-gray-200 mb-2">No Worksheet Found</h3>
+                    <p className="text-gray-400 text-sm font-light">
+                      No worksheets available for this topic yet. Check back later or ask your tutor for practice questions.
+                    </p>
+                  </div>
+                )
+              ) : (
+                /* Glass Box Placeholder for other tabs */
+                <div className="flex flex-col items-center justify-center h-full p-8">
+                  <div className="flex flex-col items-center gap-6 p-10 rounded-2xl border border-white/5 bg-white/[0.02] text-center max-w-md w-full shadow-lg relative overflow-hidden group">
+                     {/* Shimmer Effect */}
+                     <div className="absolute inset-0 -translate-x-[150%] bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-12 group-hover:animate-[shimmer_2s_infinite]"></div>
+                     
+                     <FileText className="w-16 h-16 text-gray-700 mx-auto" />
+                     <div className="space-y-3 w-full">
+                        <div className="h-2 bg-white/5 rounded-full w-3/4 mx-auto"></div>
+                        <div className="h-2 bg-white/5 rounded-full w-full mx-auto"></div>
+                        <div className="h-2 bg-white/5 rounded-full w-5/6 mx-auto"></div>
+                     </div>
+                     <p className="text-gray-400 text-sm mt-4 font-light">Document will render here automatically when a dynamic resource is extracted.</p>
+                  </div>
+                </div>
+              )}
             </div>
          </div>
       </div>
@@ -262,3 +366,4 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
 };
 
 export default InteractiveTutor;
+
