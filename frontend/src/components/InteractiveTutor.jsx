@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Send, FileText, Bot, User, X, ChevronLeft, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import HybridDocumentViewer from './HybridDocumentViewer';
 
 const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   const { chapterId } = useParams();
@@ -166,7 +167,7 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   };
 
   return (
-    <div className="h-full w-full flex p-6 relative overflow-hidden">
+    <div className="h-full w-full flex p-4 sm:p-6 lg:gap-6 relative overflow-hidden bg-[#050505]">
       
       {/* Floating Action Button (Ask Tutor) */}
       {!isTutorOpen && (
@@ -176,17 +177,17 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
           aria-label="Open AI Tutor"
         >
           <Bot className="w-5 h-5 group-hover:scale-110 transition-transform" />
-          <span className="font-medium font-sans text-sm tracking-wide">Ask Tutor</span>
+          <span className="font-medium font-sans text-sm tracking-wide hidden sm:inline">Ask Tutor</span>
           <ChevronLeft className="w-4 h-4 ml-1 opacity-50 group-hover:-translate-x-1 transition-all" />
         </button>
       )}
 
-      {/* Main Pane: Document Viewer */}
-      <div className="flex-1 w-full bg-[#0A0A0A] border border-white/5 rounded-2xl flex flex-col overflow-hidden relative shadow-[0_8px_30px_rgb(0,0,0,0.5)]">
+      {/* Main Pane: Left Side (Document/Hybrid Viewer) */}
+      <div className={`flex-1 w-full bg-[#0A0A0A] border border-white/5 rounded-2xl flex flex-col overflow-hidden relative shadow-[0_8px_30px_rgb(0,0,0,0.5)] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${isTutorOpen ? 'lg:mr-0' : ''}`}>
          {/* Glassmorphic Header */}
-         <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+         <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md z-10 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
            <div className="flex items-center gap-3">
-             <div className="p-2 bg-blue-500/10 rounded-lg">
+             <div className="p-2 bg-blue-500/10 rounded-lg shrink-0">
                <FileText className="w-5 h-5 text-blue-400" />
              </div>
              <div>
@@ -196,12 +197,12 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
            </div>
            
            {/* Tab Row */}
-           <div className="flex bg-[#111] border border-white/5 rounded-lg p-1">
+           <div className="flex bg-[#111] border border-white/5 rounded-lg p-1 overflow-x-auto hide-scrollbar">
               {['Lesson', 'Worksheet', 'Simulation', 'Quiz'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab && setActiveTab(tab)}
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === tab ? 'bg-[#222] text-white shadow-sm border border-white/10' : 'text-gray-500 hover:text-gray-300'}`}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === tab ? 'bg-[#222] text-white shadow-sm border border-white/10' : 'text-gray-500 hover:text-gray-300'}`}
                 >
                   {tab}
                 </button>
@@ -210,44 +211,13 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
          </div>
 
          {/* Document Body Area */}
-         <div className="flex-1 flex flex-col relative overflow-hidden">
-            {/* Subtle Gradient background effect */}
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#050505]/80 pointer-events-none" />
-            
+         <div className="flex-1 flex flex-col relative overflow-hidden bg-gradient-to-b from-transparent to-[#050505]/50">
             <div className="flex-1 overflow-y-auto z-10 styled-scrollbar relative">
               {activeTab === 'Worksheet' ? (
-                isFetchingResource ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-4">
-                    <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
-                    <p className="text-gray-400 text-sm">Loading worksheet...</p>
-                  </div>
-                ) : worksheetResource ? (
-                  <div className="p-8 max-w-4xl mx-auto w-full prose prose-invert">
-                    <h1 className="text-3xl font-drama text-white mb-6 pb-4 border-b border-white/10">
-                      {worksheetResource.title}
-                    </h1>
-                    <div className="text-gray-300 leading-relaxed space-y-4">
-                       {/* Render markdown if available, fallback to simple text */}
-                       {worksheetResource.content_markdown ? (
-                         <ReactMarkdown>{worksheetResource.content_markdown}</ReactMarkdown>
-                       ) : worksheetResource.description ? (
-                         <ReactMarkdown>{worksheetResource.description}</ReactMarkdown>
-                       ) : (
-                         <p className="text-gray-400 italic">No detailed content available for this resource yet.</p>
-                       )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full p-8 text-center max-w-md mx-auto">
-                    <div className="p-4 bg-white/5 rounded-2xl mb-4 border border-white/5">
-                      <FileText className="w-12 h-12 text-gray-500" />
-                    </div>
-                    <h3 className="text-xl font-drama text-gray-200 mb-2">No Worksheet Found</h3>
-                    <p className="text-gray-400 text-sm font-light">
-                      No worksheets available for this topic yet. Check back later or ask your tutor for practice questions.
-                    </p>
-                  </div>
-                )
+                // --- HYBRID DOCUMENT VIEWER INTEGRATION ---
+                <div className="w-full h-full">
+                  <HybridDocumentViewer />
+                </div>
               ) : (
                 /* Glass Box Placeholder for other tabs */
                 <div className="flex flex-col items-center justify-center h-full p-8">
@@ -269,96 +239,107 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
          </div>
       </div>
 
-      {/* Right Pane: AI Chat Drawer */}
-      <div className={`absolute top-0 right-0 h-full w-full sm:w-[450px] bg-[#0A0A0A] border-l border-white/5 flex flex-col overflow-hidden shadow-[-10px_0_30px_rgba(0,0,0,0.7)] z-50 transition-transform duration-300 ${isTutorOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-         {/* Chat Header */}
-         <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md flex items-center justify-between z-10">
-            <div className="flex items-center gap-3">
-               <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
-                  <Bot className="w-5 h-5 text-emerald-400" />
-               </div>
-               <div>
-                  <h3 className="text-gray-200 font-medium font-drama">Interactive Tutor</h3>
-                  <div className="flex items-center gap-2 mt-0.5">
-                     <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'} shadow-sm`}></div>
-                     <span className={`text-[10px] uppercase tracking-wider ${isLoading ? 'text-amber-500' : 'text-emerald-500/80'} font-medium transition-colors`}>
-                       {isLoading ? 'Processing...' : 'Session Active'}
-                     </span>
-                  </div>
-               </div>
-            </div>
-            <button 
-              onClick={() => setIsTutorOpen(false)}
-              className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-white/10"
-              aria-label="Close Tutor Drawer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-         </div>
-
-         {/* Message History Container */}
-         <div className="flex-1 overflow-y-auto p-4 space-y-6 styled-scrollbar relative">
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none opacity-20"></div>
-            
-            <div className="relative z-10 space-y-6 flex flex-col">
-              {messages.map((msg) => (
-                 <div key={msg.id} className={`flex gap-3 max-w-[90%] sm:max-w-[85%] ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
-                   <div className={`w-8 h-8 rounded-full flex justify-center items-center shrink-0 ${msg.role === 'user' ? 'bg-blue-600/20 border border-blue-500/30 shadow-[0_0_15px_rgba(37,99,235,0.2)]' : (msg.isError ? 'bg-red-500/10 border border-red-500/30' : 'bg-[#151515] border border-white/10')}`}>
-                       {msg.role === 'user' ? <User className="w-4 h-4 text-blue-400" /> : <Bot className={`w-4 h-4 ${msg.isError ? 'text-red-400' : 'text-emerald-400'}`} />}
-                   </div>
-                   <div className={`p-4 text-sm leading-relaxed shadow-sm font-light tracking-wide
-                     ${msg.role === 'user' 
-                       ? 'bg-[#111]/80 backdrop-blur-sm border-blue-500/20 border text-blue-50/90 rounded-2xl rounded-tr-sm' 
-                       : (msg.isError ? 'bg-red-500/5 backdrop-blur-sm border border-red-500/20 text-red-200 rounded-2xl rounded-tl-sm' : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm w-full')}`}>
-                       {msg.text}
-                   </div>
+      {/* Right Pane: AI Chat Split-Screen / Drawer */}
+      <div 
+        className={`
+          fixed inset-y-0 right-0 z-50 w-full sm:w-[450px] p-4 sm:p-6 pl-0
+          lg:static lg:p-0 lg:z-10
+          transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]
+          ${isTutorOpen 
+            ? 'translate-x-0 lg:w-[400px] xl:w-[450px] lg:opacity-100' 
+            : 'translate-x-full lg:w-0 lg:opacity-0 lg:overflow-hidden lg:ml-0'}
+        `}
+      >
+         <div className="h-full w-full bg-[#0A0A0A] border border-white/5 rounded-2xl flex flex-col overflow-hidden shadow-[-10px_0_30px_rgba(0,0,0,0.7)] lg:shadow-[0_8px_30px_rgb(0,0,0,0.5)]">
+           {/* Chat Header */}
+           <div className="p-4 border-b border-white/5 bg-[#050505]/80 backdrop-blur-md flex items-center justify-between z-10">
+              <div className="flex items-center gap-3">
+                 <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
+                    <Bot className="w-5 h-5 text-emerald-400" />
                  </div>
-              ))}
+                 <div>
+                    <h3 className="text-gray-200 font-medium font-drama">Interactive Tutor</h3>
+                    <div className="flex items-center gap-2 mt-0.5">
+                       <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'} shadow-sm`}></div>
+                       <span className={`text-[10px] uppercase tracking-wider ${isLoading ? 'text-amber-500' : 'text-emerald-500/80'} font-medium transition-colors`}>
+                         {isLoading ? 'Processing...' : 'Session Active'}
+                       </span>
+                    </div>
+                 </div>
+              </div>
+              <button 
+                onClick={() => setIsTutorOpen(false)}
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-white/10"
+                aria-label="Close Tutor Drawer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+           </div>
+
+           {/* Message History Container */}
+           <div className="flex-1 overflow-y-auto p-4 space-y-6 styled-scrollbar relative">
+              <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none opacity-20"></div>
               
-              {/* Typing Indicator */}
-              {isLoading && (
-                 <div className="flex gap-3 max-w-[90%] sm:max-w-[85%] mr-auto items-end animate-in fade-in zoom-in duration-300">
-                    <div className="w-8 h-8 rounded-full flex justify-center items-center shrink-0 bg-[#151515] border border-white/10">
-                        <Bot className="w-4 h-4 text-emerald-400" />
-                    </div>
-                    <div className="p-4 bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-sm flex items-center h-[52px]">
-                        <div className="flex gap-1.5 items-center">
-                            <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                            <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                            <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce"></div>
-                        </div>
-                    </div>
-                 </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-         </div>
+              <div className="relative z-10 space-y-6 flex flex-col">
+                {messages.map((msg) => (
+                   <div key={msg.id} className={`flex gap-3 max-w-[90%] sm:max-w-[85%] ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
+                     <div className={`w-8 h-8 rounded-full flex justify-center items-center shrink-0 ${msg.role === 'user' ? 'bg-blue-600/20 border border-blue-500/30 shadow-[0_0_15px_rgba(37,99,235,0.2)]' : (msg.isError ? 'bg-red-500/10 border border-red-500/30' : 'bg-[#151515] border border-white/10')}`}>
+                         {msg.role === 'user' ? <User className="w-4 h-4 text-blue-400" /> : <Bot className={`w-4 h-4 ${msg.isError ? 'text-red-400' : 'text-emerald-400'}`} />}
+                     </div>
+                     <div className={`p-4 text-sm leading-relaxed shadow-sm font-light tracking-wide
+                       ${msg.role === 'user' 
+                         ? 'bg-[#111]/80 backdrop-blur-sm border-blue-500/20 border text-blue-50/90 rounded-2xl rounded-tr-sm' 
+                         : (msg.isError ? 'bg-red-500/5 backdrop-blur-sm border border-red-500/20 text-red-200 rounded-2xl rounded-tl-sm' : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm w-full')}`}>
+                         {msg.text}
+                     </div>
+                   </div>
+                ))}
+                
+                {/* Typing Indicator */}
+                {isLoading && (
+                   <div className="flex gap-3 max-w-[90%] sm:max-w-[85%] mr-auto items-end animate-in fade-in zoom-in duration-300">
+                      <div className="w-8 h-8 rounded-full flex justify-center items-center shrink-0 bg-[#151515] border border-white/10">
+                          <Bot className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <div className="p-4 bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-sm flex items-center h-[52px]">
+                          <div className="flex gap-1.5 items-center">
+                              <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                              <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                              <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce"></div>
+                          </div>
+                      </div>
+                   </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+           </div>
 
-         {/* Chat Input Area */}
-         <div className="p-4 bg-[#050505]/80 backdrop-blur-md border-t border-white/5 z-10">
-            <form onSubmit={handleSend} className="relative flex items-center">
-               <input
-                 type="text"
-                 value={inputValue}
-                 onChange={(e) => setInputValue(e.target.value)}
-                 disabled={isLoading}
-                 placeholder={isLoading ? "Tutor is writing..." : "Ask your tutor a question..."}
-                 className="w-full bg-[#111] border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-gray-200 text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-300 shadow-inner placeholder-gray-600 font-sans disabled:opacity-50 disabled:cursor-not-allowed"
-               />
-               <button
-                 type="submit"
-                 disabled={!inputValue.trim() || isLoading}
-                 className={`absolute right-2 p-2 rounded-lg transition-all duration-300 flex items-center justify-center 
-                  ${inputValue.trim() && !isLoading
-                    ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 hover:scale-105' 
-                    : 'text-gray-600 opacity-50 cursor-not-allowed'}`}
-               >
-                 <Send className="w-4 h-4" />
-               </button>
-            </form>
-            <div className="text-center mt-3">
-               <span className="text-[10px] text-gray-600/80 font-sans block max-w-[250px] mx-auto leading-tight">AI responses are contextual and may not be 100% accurate.</span>
-            </div>
+           {/* Chat Input Area */}
+           <div className="p-4 bg-[#050505]/80 backdrop-blur-md border-t border-white/5 z-10">
+              <form onSubmit={handleSend} className="relative flex items-center">
+                 <input
+                   type="text"
+                   value={inputValue}
+                   onChange={(e) => setInputValue(e.target.value)}
+                   disabled={isLoading}
+                   placeholder={isLoading ? "Tutor is writing..." : "Ask your tutor a question..."}
+                   className="w-full bg-[#111] border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-gray-200 text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-300 shadow-inner placeholder-gray-600 font-sans disabled:opacity-50 disabled:cursor-not-allowed"
+                 />
+                 <button
+                   type="submit"
+                   disabled={!inputValue.trim() || isLoading}
+                   className={`absolute right-2 p-2 rounded-lg transition-all duration-300 flex items-center justify-center 
+                    ${inputValue.trim() && !isLoading
+                      ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 hover:scale-105' 
+                      : 'text-gray-600 opacity-50 cursor-not-allowed'}`}
+                 >
+                   <Send className="w-4 h-4" />
+                 </button>
+              </form>
+              <div className="text-center mt-3">
+                 <span className="text-[10px] text-gray-600/80 font-sans block max-w-[250px] mx-auto leading-tight">AI responses are contextual and may not be 100% accurate.</span>
+              </div>
+           </div>
          </div>
       </div>
     </div>

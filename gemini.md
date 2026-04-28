@@ -87,6 +87,17 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Database Synchronization**: Built logic to connect to Supabase (using service role keys) and automatically map, format, and push the parsed JSON data into the `resources` table.
 - **Secure Configuration**: Updated backend environment variables (`backend/.env`) with `NVIDIA_API_KEY` to enable seamless integration with NVIDIA-hosted models.
 
+### 3.12. Hybrid Document Viewer (OpenKB Integration)
+- **Hybrid Architecture**: Built `HybridDocumentViewer.jsx` to dynamically fetch and display OpenKB JSON data from the Supabase `resources` table.
+- **Premium UI Toggle**: Implemented a smooth, glassmorphic toggle using Framer Motion (`layoutId`) to switch between a traditional "Document View" (rendering flat Markdown) and a dynamic "Interactive Tutor View".
+- **Interactive Knowledge Graph**: Engineered a recursive `<KnowledgeNode />` React component to safely parse and render the deeply-nested OpenKB JSON structure into an interactive, visually stunning tree graph.
+- **Dependency Management**: Integrated `framer-motion` into the frontend environment to power advanced micro-interactions and animations.
+
+### 3.13. Agentic Split-Screen UI & Credential Sync
+- **Responsive Split-Screen**: Refactored `InteractiveTutor.jsx` to utilize a robust Tailwind Flexbox architecture, establishing a side-by-side layout on desktop where the Hybrid Document Viewer and AI Chat pane dynamically share screen real estate.
+- **Mobile Drawer Fallback**: Engineered a graceful degradation strategy for mobile devices, converting the chat interface back into a fixed, sliding overlay drawer to preserve the main reading space.
+- **Automated Environment Sync**: Executed an automated credential sync to retrieve the public Supabase `anon` key from the MCP server and securely generated `.env` files in the frontend root, ensuring seamless local data fetching for the newly integrated OpenKB components.
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
