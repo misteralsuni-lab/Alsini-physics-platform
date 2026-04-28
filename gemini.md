@@ -76,12 +76,25 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Frontend Regex Interceptor**: Built a message parser within `InteractiveTutor.jsx` that intercepts incoming AI responses, stealthily stripping the `[SWITCH_TAB]` tags before they reach the user. It then programmatically triggers the master dashboard state, resulting in a highly agentic interface that seamlessly navigates the UI on the student's behalf.
 - **Dynamic Tab Header**: Constructed a premium glassmorphic title and tab row inside the Document Viewer that syncs live with the active tab state to visually present the AI's capability.
 
+### 3.10. Dynamic Worksheet Rendering & Automated Testing
+- **Supabase Integration**: Enabled the 'Worksheet' tab in the VLE Dashboard to dynamically fetch and display educational content from the Supabase `resources` table based on the active `specification_point_id`.
+- **Markdown UI**: Updated the UI to intelligently render retrieved markdown content or display a beautifully styled empty state when no data is found.
+- **Playwright QA Pipeline**: Integrated Playwright into the frontend environment. Created robust test scripts that handle asynchronous network requests to verify that Supabase data is correctly fetched and rendered.
+
+### 3.11. Automated PDF Ingestion Pipeline
+- **Hybrid AI Extraction**: Developed standalone ingestion scripts (including `master_ingestion.py` and Node.js equivalents) to automate the processing of Edexcel PDF materials.
+- **Vision-Based Processing**: Utilized tools like `pdf2image`, `PyPDF2`, and advanced AI models (Gemini API, NVIDIA NIM endpoints with Llama 3.2 90B Vision and Nemotron 70B) to extract complex physics content and structure it into an OpenKB JSON graph.
+- **Database Synchronization**: Built logic to connect to Supabase (using service role keys) and automatically map, format, and push the parsed JSON data into the `resources` table.
+- **Secure Configuration**: Updated backend environment variables (`backend/.env`) with `NVIDIA_API_KEY` to enable seamless integration with NVIDIA-hosted models.
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
 - **Component Modularity**: Focused on writing clean, modular, and well-commented React components for future scalability.
 - **Component Routing**: Fixed an issue causing a blank screen ("white screen of death") by ensuring all global components (`Navbar`, `NoiseOverlay`, `Home`) remained imported correctly inside `App.jsx` during standard routing structure updates.
 - **Version Control**: Implemented Git Version Control and optimized repository by excluding dependency folders.
+- **Backend Connection Errors**: Debugged network 'Connection error' between frontend and backend by implementing permissive CORS settings for local development, adding X-Ray logging, and improving error handling in `backend/server.js`.
 
 ## 5. Next Steps
 - **Interactive Resources**: Continue developing the dynamic PDF embed components and the toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.
+- **Content Expansion**: Expand the automated ingestion pipeline to cover additional chapters and integrate interactive physics simulations into the VLE.
