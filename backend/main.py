@@ -45,7 +45,7 @@ class Message(BaseModel):
     content: str
 
 class TutorRequest(BaseModel):
-    message: str
+    student_prompt: str
     history: Optional[List[Message]] = []
 
 # Constants
@@ -103,10 +103,10 @@ def evaluate_routing(prompt: str) -> str:
 
 @app.post("/api/tutor")
 async def tutor_endpoint(request: TutorRequest):
-    if not request.message:
-        raise HTTPException(status_code=400, detail="Message is required.")
+    if not request.student_prompt:
+        raise HTTPException(status_code=400, detail="student_prompt is required.")
         
-    route_target = evaluate_routing(request.message)
+    route_target = evaluate_routing(request.student_prompt)
     
     # Fetch Context Data (Vertical Slice: Forces and Motion)
     context_data = fetch_forces_and_motion_data()
@@ -132,7 +132,7 @@ async def tutor_endpoint(request: TutorRequest):
             messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.content})
             
         # Add current message
-        messages.append({"role": "user", "content": request.message})
+        messages.append({"role": "user", "content": request.student_prompt})
         
         try:
             response = nvidia_client.chat.completions.create(
@@ -142,7 +142,7 @@ async def tutor_endpoint(request: TutorRequest):
                 max_tokens=2048,
             )
             reply = response.choices[0].message.content
-            return {"response": reply, "routed_to": "NVIDIA_LLAMA_3.3"}
+            return {"response": reply, "model_used": "NVIDIA_LLAMA_3.3"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Nvidia API Error: {str(e)}")
             
@@ -166,9 +166,9 @@ async def tutor_endpoint(request: TutorRequest):
             )
             
             chat = local_model.start_chat(history=gemini_history)
-            result = chat.send_message(request.message)
+            result = chat.send_message(request.student_prompt)
             
-            return {"response": result.text, "routed_to": "GEMINI_FLASH"}
+            return {"response": result.text, "model_used": "GEMINI_FLASH"}
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")

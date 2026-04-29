@@ -108,15 +108,15 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
       }));
 
     try {
-      // 3. Make real fetch call to the new Express backend
-      const response = await fetch('http://localhost:5000/api/chat', {
+      // 3. Make real fetch call to the new FastAPI backend
+      const response = await fetch('http://localhost:8000/api/tutor', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           history: formattedHistory,
-          message: userMessageText
+          student_prompt: userMessageText
         })
       });
 
@@ -127,6 +127,9 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
       const data = await response.json();
 
       let aiText = data.response || '';
+      const modelUsed = data.model_used || 'Unknown Model';
+      
+      console.log(`[Semantic Router] Routed to: ${modelUsed}`);
       
       // Intercept navigation tag
       const tabTracker = /\[SWITCH_TAB:\s*(.*?)\]/i;
@@ -146,7 +149,7 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
       // Append successfully received message
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, role: 'ai', text: aiText }
+        { id: Date.now() + 1, role: 'ai', text: aiText, modelUsed: modelUsed }
       ]);
       
     } catch (error) {
@@ -286,11 +289,16 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
                      <div className={`w-8 h-8 rounded-full flex justify-center items-center shrink-0 ${msg.role === 'user' ? 'bg-blue-600/20 border border-blue-500/30 shadow-[0_0_15px_rgba(37,99,235,0.2)]' : (msg.isError ? 'bg-red-500/10 border border-red-500/30' : 'bg-[#151515] border border-white/10')}`}>
                          {msg.role === 'user' ? <User className="w-4 h-4 text-blue-400" /> : <Bot className={`w-4 h-4 ${msg.isError ? 'text-red-400' : 'text-emerald-400'}`} />}
                      </div>
-                     <div className={`p-4 text-sm leading-relaxed shadow-sm font-light tracking-wide
+                     <div className={`p-4 text-sm leading-relaxed shadow-sm font-light tracking-wide relative
                        ${msg.role === 'user' 
                          ? 'bg-[#111]/80 backdrop-blur-sm border-blue-500/20 border text-blue-50/90 rounded-2xl rounded-tr-sm' 
                          : (msg.isError ? 'bg-red-500/5 backdrop-blur-sm border border-red-500/20 text-red-200 rounded-2xl rounded-tl-sm' : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm w-full')}`}>
                          {msg.text}
+                         {msg.modelUsed && (
+                           <div className="absolute -bottom-3 right-2 bg-[#1a1a1a] border border-white/10 px-2 py-0.5 rounded-full text-[9px] text-gray-500 font-mono flex items-center gap-1 shadow-sm opacity-80 hover:opacity-100 transition-opacity cursor-default">
+                              <Bot className="w-2.5 h-2.5" /> {msg.modelUsed.replace('_', ' ')}
+                           </div>
+                         )}
                      </div>
                    </div>
                 ))}
