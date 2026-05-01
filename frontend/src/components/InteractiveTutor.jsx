@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { Send, FileText, Bot, User, X, ChevronLeft, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
 import HybridDocumentViewer from './HybridDocumentViewer';
 import QuizEngine from './QuizEngine';
 
@@ -299,11 +299,12 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
                      <div className={`p-4 text-sm leading-relaxed shadow-sm font-light tracking-wide relative
                        ${msg.role === 'user' 
                          ? 'bg-[#111]/80 backdrop-blur-sm border-blue-500/20 border text-blue-50/90 rounded-2xl rounded-tr-sm' 
-                         : (msg.isError ? 'bg-red-500/5 backdrop-blur-sm border border-red-500/20 text-red-200 rounded-2xl rounded-tl-sm' : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm w-full')}
-                       markdown-body-custom`}>
-                         <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                           {msg.text}
-                         </ReactMarkdown>
+                         : (msg.isError ? 'bg-red-500/5 backdrop-blur-sm border border-red-500/20 text-red-200 rounded-2xl rounded-tl-sm' : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm w-full')}`}>
+                         <div className="prose prose-invert prose-emerald max-w-none prose-p:my-0 prose-pre:my-2 prose-sm font-light">
+                           <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                             {msg.text}
+                           </ReactMarkdown>
+                         </div>
                          {msg.modelUsed && (
                            <div className="absolute -bottom-3 right-2 bg-[#1a1a1a] border border-white/10 px-2 py-0.5 rounded-full text-[9px] text-gray-500 font-mono flex items-center gap-1 shadow-sm opacity-80 hover:opacity-100 transition-opacity cursor-default">
                               <Bot className="w-2.5 h-2.5" /> {msg.modelUsed.replace('_', ' ')}

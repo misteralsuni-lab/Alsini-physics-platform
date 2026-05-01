@@ -4,33 +4,32 @@ import { Send, Lightbulb, CheckCircle, AlertTriangle, Bot, Loader2 } from 'lucid
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+
 const QuizEngine = ({ resourceId, activeSpecPointId }) => {
   const [questionIndex, setQuestionIndex] = useState(1);
-  const [questionText, setQuestionText] = useState("");
-  const [maxScore, setMaxScore] = useState(3);
+  const [questionText, setQuestionText] = useState("Loading question...");
+  const [maxScore, setMaxScore] = useState(0);
   const [examinerHint, setExaminerHint] = useState("");
-  const [isLoadingQuestion, setIsLoadingQuestion] = useState(true);
   
   const [studentAnswer, setStudentAnswer] = useState('');
   const [isGrading, setIsGrading] = useState(false);
   const [correction, setCorrection] = useState(null);
   const [hintVisible, setHintVisible] = useState(false);
-
+  
   useEffect(() => {
     const fetchQuestion = async () => {
-      setIsLoadingQuestion(true);
       try {
         const response = await fetch(`http://localhost:8000/api/question?resource_id=${resourceId || ''}`);
-        if (!response.ok) throw new Error('Failed to fetch question');
-        const data = await response.json();
-        setQuestionIndex(data.question_index);
-        setQuestionText(data.question_text);
-        setMaxScore(data.max_score);
-        setExaminerHint(data.examiner_hint);
+        if (response.ok) {
+          const data = await response.json();
+          setQuestionIndex(data.question_index);
+          setQuestionText(data.question_text);
+          setMaxScore(data.max_score);
+          setExaminerHint(data.examiner_hint);
+        }
       } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoadingQuestion(false);
+        console.error("Failed to fetch question:", err);
+        setQuestionText("Failed to load question.");
       }
     };
     fetchQuestion();
@@ -102,15 +101,6 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
     }
   };
 
-  if (isLoadingQuestion) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full w-full">
-        <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mb-4" />
-        <p className="text-gray-400 font-light">Loading Examiner Questions...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col h-full w-full max-w-3xl mx-auto p-4 sm:p-6 text-gray-200">
       <div className="bg-[#111] border border-white/10 rounded-2xl p-6 shadow-lg mb-6 relative overflow-hidden">
@@ -124,18 +114,18 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
           </span>
         </div>
         
-        <div className="text-gray-300 mb-6 leading-relaxed text-sm md:text-base markdown-body-custom">
+        <div className="text-gray-300 mb-6 leading-relaxed text-sm md:text-base prose prose-invert prose-emerald max-w-none">
           <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
             {questionText}
           </ReactMarkdown>
         </div>
         
-        {hintVisible && examinerHint && (
-          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex gap-3 text-amber-200/90 text-sm">
+        {hintVisible && (
+          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex gap-3 text-amber-200/90 text-sm prose prose-invert prose-emerald max-w-none prose-p:my-0">
             <Lightbulb className="w-5 h-5 shrink-0 text-amber-400 mt-1" />
-            <div className="markdown-body-custom w-full">
+            <div className="flex-1">
               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {examinerHint}
+                {examinerHint || "No hint available."}
               </ReactMarkdown>
             </div>
           </div>
@@ -213,7 +203,7 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
           </div>
           
           <div className="p-6">
-            <div className="text-gray-300 leading-relaxed text-sm md:text-base font-light markdown-body-custom">
+            <div className="text-gray-300 leading-relaxed text-sm md:text-base font-light prose prose-invert prose-emerald max-w-none">
               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                 {correction.explanation}
               </ReactMarkdown>

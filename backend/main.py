@@ -128,7 +128,7 @@ async def tutor_endpoint(request: TutorRequest):
         "You are an expert, encouraging Edexcel IGCSE and A-Level Physics Tutor.\n"
         "You are an Edexcel IGCSE Physics Examiner. Never ask hybrid coordinate-graphing questions. Questions must be EITHER a pure mathematical calculation OR a conceptual explanation. Do not deviate from official past-paper formats.\n"
         "You guide students using Socratic questioning and never give the final answer immediately.\n"
-        "Format mathematical explanations cleanly using LaTeX (wrap inline math with $ and block math with $$).\n"
+        "Format mathematical explanations cleanly.\n"
         "The UI has 4 tabs: Lesson, Worksheet, Simulation, and Quiz. If a student asks to view a resource, take a quiz, or use a simulation, you must append a navigation tag to the end of your response in the exact format: [SWITCH_TAB: TabName] (e.g., [SWITCH_TAB: Quiz])."
     )
     
@@ -194,12 +194,13 @@ async def health_check():
 
 @app.get("/api/question")
 async def get_question(resource_id: Optional[str] = None):
-    # Mocking data retrieval from OpenKB
+    # This simulates fetching a question and its examiner report hint from OpenKB
+    # based on the resource_id.
     return {
         "question_index": 1,
-        "question_text": "A car accelerates uniformly from rest to $20 \\text{ m/s}$ in $5 \\text{ s}$. Calculate the acceleration of the car. Show your working. \n\n $$a = \\frac{\\Delta v}{\\Delta t}$$",
+        "question_text": "A car accelerates uniformly from rest to 20 m/s in 5 seconds. Calculate the acceleration of the car. Show your working. $a = \\frac{\\Delta v}{\\Delta t}$",
         "max_score": 3,
-        "examiner_hint": "**Examiner Report Highlight:** Many students forget that 'from rest' implies an initial velocity ($u$) of $0 \\text{ m/s}$. Ensure you state the formula clearly before substituting values, e.g., $a = \\frac{v - u}{t}$."
+        "examiner_hint": "**Examiner Report Highlight:** Many students forget that 'from rest' implies an initial velocity ($u$) of 0 m/s. Ensure you state the formula clearly before substituting values. Remember $a = \\frac{v - u}{t}$."
     }
 
 @app.post("/api/grade", response_model=GradeResponse)
@@ -210,8 +211,7 @@ async def grade_endpoint(request: GradeRequest):
     context_data = fetch_forces_and_motion_data()
     
     system_prompt = (
-        "You are a Rigorous Edexcel IGCSE Physics Examiner marking a physics test.\n"
-        "Never ask hybrid coordinate-graphing questions. Questions must be EITHER a pure mathematical calculation OR a conceptual explanation. Do not deviate from official past-paper formats.\n"
+        "You are a Rigorous Edexcel Examiner marking a physics test.\n"
         "You MUST respond ONLY with a strict JSON object containing three keys: 'marks_awarded' (integer), 'total_marks' (integer), and 'explanation' (string).\n"
         "Your grading logic must strictly follow the Mark Scheme provided in the Context.\n"
         "If the student's answer includes coordinates from a GraphDraw canvas (e.g., a JSON array of points), evaluate the general trend and intercepts of the coordinates rather than demanding exact pixel-perfection.\n"
