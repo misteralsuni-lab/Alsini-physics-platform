@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import google.generativeai as genai
 from typing import List, Optional
-
+import json
+import re
 # Load environment variables
 load_dotenv()
 
@@ -47,6 +48,19 @@ class Message(BaseModel):
 class TutorRequest(BaseModel):
     student_prompt: str
     history: Optional[List[Message]] = []
+
+class GradeRequest(BaseModel):
+    student_id: str
+    resource_id: str
+    question_index: int
+    student_answer: str
+    max_score: int
+    question_text: str
+
+class GradeResponse(BaseModel):
+    marks_awarded: int
+    total_marks: int
+    explanation: str
 
 # Constants
 TARGET_RESOURCE_ID = "5729d034-a6c7-4f35-b81c-fcac447289c7" # Forces and Motion Resource
@@ -112,8 +126,9 @@ async def tutor_endpoint(request: TutorRequest):
     context_data = fetch_forces_and_motion_data()
     system_prompt = (
         "You are an expert, encouraging Edexcel IGCSE and A-Level Physics Tutor.\n"
+        "You are an Edexcel IGCSE Physics Examiner. Never ask hybrid coordinate-graphing questions. Questions must be EITHER a pure mathematical calculation OR a conceptual explanation. Do not deviate from official past-paper formats.\n"
         "You guide students using Socratic questioning and never give the final answer immediately.\n"
-        "Format mathematical explanations cleanly.\n"
+        "Format mathematical explanations cleanly using LaTeX (wrap inline math with $ and block math with $$).\n"
         "The UI has 4 tabs: Lesson, Worksheet, Simulation, and Quiz. If a student asks to view a resource, take a quiz, or use a simulation, you must append a navigation tag to the end of your response in the exact format: [SWITCH_TAB: TabName] (e.g., [SWITCH_TAB: Quiz])."
     )
     
@@ -176,3 +191,75 @@ async def tutor_endpoint(request: TutorRequest):
 @app.get("/health")
 async def health_check():
     return {"status": "OK", "message": "FastAPI Backend is running"}
+
+@app.get("/api/question")
+async def get_question(resource_id: Optional[str] = None):
+    # Mocking data retrieval from OpenKB
+    return {
+        "question_index": 1,
+        "question_text": "A car accelerates uniformly from rest to $20 \\text{ m/s}$ in $5 \\text{ s}$. Calculate the acceleration of the car. Show your working. \n\n $$a = \\frac{\\Delta v}{\\Delta t}$$",
+        "max_score": 3,
+        "examiner_hint": "**Examiner Report Highlight:** Many students forget that 'from rest' implies an initial velocity ($u$) of $0 \\text{ m/s}$. Ensure you state the formula clearly before substituting values, e.g., $a = \\frac{v - u}{t}$."
+    }
+
+@app.post("/api/grade", response_model=GradeResponse)
+async def grade_endpoint(request: GradeRequest):
+    if not nvidia_client:
+        raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
+        
+    context_data = fetch_forces_and_motion_data()
+    
+    system_prompt = (
+        "You are a Rigorous Edexcel IGCSE Physics Examiner marking a physics test.\n"
+        "Never ask hybrid coordinate-graphing questions. Questions must be EITHER a pure mathematical calculation OR a conceptual explanation. Do not deviate from official past-paper formats.\n"
+        "You MUST respond ONLY with a strict JSON object containing three keys: 'marks_awarded' (integer), 'total_marks' (integer), and 'explanation' (string).\n"
+        "Your grading logic must strictly follow the Mark Scheme provided in the Context.\n"
+        "If the student's answer includes coordinates from a GraphDraw canvas (e.g., a JSON array of points), evaluate the general trend and intercepts of the coordinates rather than demanding exact pixel-perfection.\n"
+        "Do not include any other markdown text, code blocks, or greetings."
+    )
+    
+    if context_data:
+        system_prompt += f"\n\nContext (Forces and Motion Knowledge Graph & Mark Scheme):\n{context_data}\n"
+        
+    user_prompt = (
+        f"Question: {request.question_text}\n"
+        f"Maximum marks available: {request.max_score}\n"
+        f"Student's Answer: {request.student_answer}\n"
+        "Please provide your strict JSON assessment."
+    )
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    
+    try:
+        response = nvidia_client.chat.completions.create(
+            model="meta/llama-3.3-70b-instruct",
+            messages=messages,
+            temperature=0.1,
+            max_tokens=1024,
+        )
+        reply = response.choices[0].message.content
+        
+        # Robust parsing for JSON
+        # Attempt to parse directly first
+        try:
+            parsed_json = json.loads(reply)
+        except json.JSONDecodeError:
+            # Fallback regex if LLM wraps in ```json ... ```
+            match = re.search(r'\{.*\}', reply, re.DOTALL)
+            if match:
+                parsed_json = json.loads(match.group(0))
+            else:
+                raise ValueError("Could not extract JSON from LLM response.")
+                
+        return GradeResponse(
+            marks_awarded=parsed_json.get("marks_awarded", 0),
+            total_marks=request.max_score,
+            explanation=parsed_json.get("explanation", "No explanation provided.")
+        )
+        
+    except Exception as e:
+        print(f"Grading Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Grading Engine Error: {str(e)}")

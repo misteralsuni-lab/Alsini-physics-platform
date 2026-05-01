@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { FileText, Network, Loader2, Maximize2, AlertCircle } from 'lucide-react';
 
 // --- Premium UI Tokens & Variants ---
@@ -187,7 +189,9 @@ const HybridDocumentViewer = () => {
               >
                 <div className="prose prose-invert prose-emerald max-w-none">
                   {data?.content_markdown ? (
-                    <ReactMarkdown>{data.content_markdown}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                      {data.content_markdown}
+                    </ReactMarkdown>
                   ) : (
                     <div className="p-8 border border-dashed border-white/10 rounded-2xl text-center bg-[#0A0A0A]/50">
                       <FileText className="w-12 h-12 text-gray-600 mx-auto mb-4" />
