@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+requests
+pydantic
+python-dotenv
+openai
+google-generativeai
+PyPDF2
+pdf2image

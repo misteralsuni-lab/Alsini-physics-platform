@@ -38,8 +38,7 @@ const model = genAI.getGenerativeModel({
  */
 app.post('/api/chat', async (req, res) => {
   try {
-    console.log('Received payload:', req.body);
-    const { history, message } = req.body;
+    const { history = [], message } = req.body || {};
 
     if (!message) {
       return res.status(400).json({ error: 'A message string is required.' });
