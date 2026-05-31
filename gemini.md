@@ -98,6 +98,10 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Mobile Drawer Fallback**: Engineered a graceful degradation strategy for mobile devices, converting the chat interface back into a fixed, sliding overlay drawer to preserve the main reading space.
 - **Automated Environment Sync**: Executed an automated credential sync to retrieve the public Supabase `anon` key from the MCP server and securely generated `.env` files in the frontend root, ensuring seamless local data fetching for the newly integrated OpenKB components.
 
+### 3.14. Supabase MCP & Development Environment Hardening
+- **Local & Remote MCP Architecture**: Configured a dual MCP (Model Context Protocol) setup. A custom Python-based local MCP server handles specialized database queries (like `resources` search), while the official Supabase Remote MCP (SSE) provides broad administrative capabilities. Documented the entire configuration across major IDEs (Cursor, VS Code, Claude Desktop) in `mcp_configuration_for_supabase.md`.
+- **Git Security & Ignore Rules**: Audited and tightened `.gitignore` rules to prevent accidental commits of sensitive environment variables, IDE settings (`.understand-anything`), python environments (`python_interpreter/`, `__pycache__/`), and large scratch binaries. Set up local Git user configuration to standardize project commits.
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
