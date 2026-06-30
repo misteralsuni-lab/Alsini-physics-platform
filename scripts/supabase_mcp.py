@@ -86,3 +86,4 @@ if __name__ == "__main__":
     
     logger.info(f"Starting Supabase MCP Server for {SUPABASE_URL}...")
     mcp.run(transport="stdio")
+  
