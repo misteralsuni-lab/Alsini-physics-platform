@@ -112,4 +112,4 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 
 ## 5. Next Steps
 - **Interactive Resources**: Continue developing the dynamic PDF embed components and the toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.
-- **Content Expansion**: Expand the automated ingestion pipeline to cover additional chapters and integrate interactive physics simulations into the VLE.
+- **Content Expansion**: Expand the automated ingestion pipeline to cover additional chapters and integrate interactive physics simulations into the Virtual Learning Environment.
