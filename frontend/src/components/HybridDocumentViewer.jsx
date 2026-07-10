@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { FileText, Network, Loader2, Maximize2, AlertCircle } from 'lucide-react';
+import { FileText, Network, Loader2, Maximize2, AlertCircle, X, ArrowUpRight } from 'lucide-react';
 
 // --- Premium UI Tokens & Variants ---
 const containerVariants = {
@@ -22,68 +22,94 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } }
 };
 
-// --- Interactive Node Renderer ---
-const KnowledgeNode = ({ label, value, delay = 0 }) => {
-  const isObject = typeof value === 'object' && value !== null;
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.4, delay: delay * 0.05 }}
-      className="mb-4"
+// --- Concept Pop-up Box ---
+const ConceptPopup = ({ block, onClose, onSelectRelated }) => (
+  <motion.div
+    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    onClick={onClose}
+  >
+    <motion.div
+      className="relative w-full max-w-lg max-h-[85vh] overflow-y-auto styled-scrollbar bg-[#0A0A0A] border border-emerald-500/30 rounded-2xl shadow-[0_0_50px_rgba(16,185,129,0.15)] p-6"
+      initial={{ scale: 0.9, y: 20 }}
+      animate={{ scale: 1, y: 0 }}
+      exit={{ scale: 0.9, y: 20 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+      onClick={(e) => e.stopPropagation()}
     >
-      <div 
-        className={`p-4 rounded-xl border border-white/10 bg-[#0A0A0A]/60 backdrop-blur-md shadow-lg
-          ${isObject ? 'cursor-pointer hover:bg-white/5 hover:border-emerald-500/30' : ''} 
-          transition-all duration-300 group`}
-        onClick={() => isObject && setExpanded(!expanded)}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-white/10"
+        aria-label="Close"
       >
-        <div className="flex items-center justify-between">
-          <span className="text-emerald-400/90 font-mono text-sm font-medium tracking-wider uppercase">
-            {label}
-          </span>
-          {isObject && (
-            <motion.div
-              animate={{ rotate: expanded ? 180 : 0 }}
-              className="w-5 h-5 flex items-center justify-center rounded-full bg-white/5 text-gray-400 group-hover:text-emerald-400"
-            >
-              ↓
-            </motion.div>
-          )}
-        </div>
-        
-        {!isObject && (
-          <div className="mt-2 text-gray-300 font-light text-sm leading-relaxed">
-            {String(value)}
+        <X className="w-5 h-5" />
+      </button>
+
+      <div className="text-[10px] uppercase tracking-widest text-emerald-400/70 mb-1">Concept</div>
+      <h2 className="text-2xl font-drama text-white mb-4 pr-8">{block.concept}</h2>
+
+      {block.formula && (
+        <div className="mb-5 p-4 rounded-xl bg-white/[0.03] border border-white/10">
+          <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Formula</div>
+          <div className="text-gray-100 text-lg leading-relaxed prose prose-invert prose-emerald max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+              {block.formula}
+            </ReactMarkdown>
           </div>
-        )}
+        </div>
+      )}
+
+      <div className="mb-5">
+        <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Definition</div>
+        <p className="text-gray-300 font-light leading-relaxed">{block.definition}</p>
       </div>
 
-      <AnimatePresence>
-        {isObject && expanded && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden ml-6 mt-2 pl-4 border-l-2 border-emerald-500/20"
-          >
-            {Object.entries(value).map(([k, v], i) => (
-              <KnowledgeNode key={k} label={k} value={v} delay={i} />
+      {block.related_concepts && block.related_concepts.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Related Concepts</div>
+          <div className="flex flex-wrap gap-2">
+            {block.related_concepts.map((rc) => (
+              <button
+                key={rc}
+                onClick={() => onSelectRelated(rc)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-colors"
+              >
+                {rc} <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
             ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </div>
+      )}
     </motion.div>
-  );
-};
+  </motion.div>
+);
 
 const HybridDocumentViewer = ({ resourceId }) => {
   const [viewMode, setViewMode] = useState('document'); // 'document' | 'interactive'
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedIdx, setSelectedIdx] = useState(null);
+
+  const blocks = React.useMemo(() => {
+    const c = data?.content;
+    if (!c) return [];
+    const arr = Array.isArray(c) ? c : Object.values(c);
+    return arr.filter((b) => b && typeof b === 'object' && b.concept);
+  }, [data]);
+
+  const conceptToIdx = React.useMemo(() => {
+    const m = new Map();
+    blocks.forEach((b, i) => m.set(b.concept, i));
+    return m;
+  }, [blocks]);
+
+  const selectConcept = (name) => {
+    const i = conceptToIdx.get(name);
+    if (i !== undefined) setSelectedIdx(i);
+  };
 
   useEffect(() => {
     if (!resourceId) {
@@ -97,7 +123,7 @@ const HybridDocumentViewer = ({ resourceId }) => {
       try {
         const { data: resourceData, error: fetchError } = await supabase
           .from('resources')
-          .select('content, content_markdown, title')
+          .select('content, title')
           .eq('id', resourceId)
           .single();
 
@@ -221,19 +247,56 @@ const HybridDocumentViewer = ({ resourceId }) => {
                     Knowledge Graph Explorer
                   </h3>
                   <p className="text-sm text-gray-400 font-light">
-                    Interact with the deeply nested OpenKB structure. Click on nodes to expand and collapse relationships.
+                    Click a concept node to open its equation and properties. Related concepts link to each other.
                   </p>
                 </motion.div>
-                
-                <div className="pl-2">
-                  {data?.content ? (
-                    <KnowledgeNode label="Root" value={data.content} />
-                  ) : (
-                    <div className="text-gray-500 italic p-4 bg-white/5 rounded-xl border border-white/5">
-                      No JSON content mapped to this resource.
-                    </div>
+
+                {blocks.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {blocks.map((b, i) => (
+                      <motion.button
+                        key={i}
+                        variants={itemVariants}
+                        onClick={() => setSelectedIdx(i)}
+                        className="text-left p-5 rounded-2xl border border-white/10 bg-[#0A0A0A]/60 backdrop-blur-md shadow-lg hover:bg-white/5 hover:border-emerald-500/40 transition-all group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-emerald-400 font-mono text-sm font-medium tracking-wider uppercase">
+                            {b.concept}
+                          </span>
+                          <ArrowUpRight className="w-4 h-4 text-gray-600 group-hover:text-emerald-400 transition-colors" />
+                        </div>
+                        <p className="mt-2 text-gray-300 font-light text-sm leading-relaxed line-clamp-2">
+                          {b.definition}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {(b.related_concepts || []).map((rc) => (
+                            <span
+                              key={rc}
+                              className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-400"
+                            >
+                              {rc}
+                            </span>
+                          ))}
+                        </div>
+                      </motion.button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 italic p-4 bg-white/5 rounded-xl border border-white/5">
+                    No concept data mapped to this resource.
+                  </div>
+                )}
+
+                <AnimatePresence>
+                  {selectedIdx !== null && blocks[selectedIdx] && (
+                    <ConceptPopup
+                      block={blocks[selectedIdx]}
+                      onClose={() => setSelectedIdx(null)}
+                      onSelectRelated={selectConcept}
+                    />
                   )}
-                </div>
+                </AnimatePresence>
               </motion.div>
             )}
           </AnimatePresence>

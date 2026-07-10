@@ -66,13 +66,22 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
           const { data, error } = await supabase
             .from('resources')
             .select('*')
-            .eq('specification_point_id', activeSpecPointId)
-            .limit(1);
+            .eq('specification_point_id', activeSpecPointId);
 
           if (error) throw error;
           
           if (data && data.length > 0) {
-            setWorksheetResource(data[0]);
+            // Prefer a resource with real extracted content over an OCR stub.
+            const isRich = (r) => {
+              const c = r.content;
+              if (!c || typeof c !== 'object') return false;
+              return Boolean(
+                c.formulae || c.key_concepts || c.common_mistakes ||
+                Object.keys(c).some((k) => /^[0-9]+$/.test(k))
+              );
+            };
+            const rich = data.find(isRich) || data[0];
+            setWorksheetResource(rich);
           } else {
             setWorksheetResource(null);
           }
