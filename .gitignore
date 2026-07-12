@@ -7,3 +7,5 @@ python_interpreter/
 mcp_configuration_for_supabase
 mcp_configuration_for_supabase.md
 
+HANDOFF_AGENT_PROMPTS.md
+HANDOFF_ASSET_PIPELINE.md
