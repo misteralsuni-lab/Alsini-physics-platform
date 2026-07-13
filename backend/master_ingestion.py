@@ -108,6 +108,9 @@ def push_to_supabase(resource_id, content):
         print(f"\n❌ Error: {db_response.status_code}\n{db_response.text}")
 
 if __name__ == "__main__":
+    from pathlib import Path
+    import sys
+
     PDF_FILE = "backend/IGCSE_Physics_Worksheet 1_Movement and Position.pdf"
     TARGET_ID = "5729d034-a6c7-4f35-b81c-fcac447289c7"
     
@@ -121,10 +124,49 @@ if __name__ == "__main__":
         # 2. OpenKB Compilation
         kb_json = compile_openkb(content)
         
-        # 3. Database Injection
+        # 3. Database Injection (Semantic JSON)
         push_to_supabase(TARGET_ID, kb_json)
-        
+            
     except Exception as e:
         print(f"Pipeline Error: {e}")
         if "poppler" in str(e).lower():
             print("\nWINDOWS FIX: You need to install Poppler for Windows to convert PDFs to images.")
+
+    # 4. Visual Asset Pipeline (Milestone 2 integration)
+    #    Extract visual assets from the same PDF, upload to Storage,
+    #    register in resource_assets table, and resolve linked_question_id.
+    print("\n" + "=" * 60)
+    print("  VISUAL ASSET EXTRACTION")
+    print("=" * 60)
+
+    try:
+        _backend_dir = Path(__file__).resolve().parent
+        sys.path.insert(0, str(_backend_dir))
+        sys.path.insert(0, str(_backend_dir / "pipeline"))
+
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise RuntimeError("Supabase credentials missing — cannot run asset pipeline.")
+
+        from pipeline.run_asset_pipeline import run_pipeline, verify_asset_rows
+        from pipeline.linked_question_resolver import resolve_linked_questions
+
+        assets = run_pipeline(PDF_FILE, TARGET_ID, SUPABASE_URL, SUPABASE_KEY)
+
+        # Resolve linked_question_id via caption parsing + semantic JSON
+        if assets:
+            print("\nResolving linked_question_id on asset rows...")
+            qid_result = resolve_linked_questions(TARGET_ID, SUPABASE_URL, SUPABASE_KEY)
+            print(f"  Resolved: {qid_result['resolved']}/{qid_result['total']}  "
+                  f"Unresolved: {qid_result['unresolved']}")
+
+            # Verify final state
+            final_rows = verify_asset_rows(TARGET_ID, SUPABASE_URL, SUPABASE_KEY)
+            for row in final_rows:
+                print(f"  -> {row['asset_type']} page {row['page_number']}: "
+                      f"linked_qid={row.get('linked_question_id')} | "
+                      f"verified={row['content_verified']}")
+
+    except Exception as asset_err:
+        print(f"  Visual Asset Pipeline Error (non-fatal): {asset_err}")
+        print("  Semantic pipeline completed successfully. "
+              "Assets can be re-extracted manually via run_asset_pipeline.py.")

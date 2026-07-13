@@ -192,6 +192,83 @@ async def tutor_endpoint(request: TutorRequest):
 async def health_check():
     return {"status": "OK", "message": "FastAPI Backend is running"}
 
+
+# -------------------------------------------------------------------
+# Visual Asset Endpoints (Milestone 2 — Resource Delivery Layer)
+# -------------------------------------------------------------------
+
+def _supabase_headers() -> dict:
+    """Build the standard PostgREST headers using the service-role key."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=500, detail="Supabase credentials not configured.")
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+@app.get("/api/resources/{resource_id}/assets")
+async def get_resource_assets(resource_id: str):
+    """
+    List all visual assets registered for a given resource.
+
+    Queries the `resource_assets` table via PostgREST and returns an
+    array of asset objects with public `storage_url`s ready for
+    frontend <img> rendering.
+    """
+    headers = _supabase_headers()
+    endpoint = (
+        f"{SUPABASE_URL}/rest/v1/resource_assets"
+        f"?resource_id=eq.{resource_id}"
+        f"&select=id,page_number,asset_type,storage_url,mime_type,width,height,"
+        f"bounding_box,caption,linked_question_id,content_verified,metadata,created_at"
+        f"&order=page_number.asc,created_at.asc"
+    )
+    try:
+        resp = requests.get(endpoint, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Supabase query failed ({resp.status_code}): {resp.text[:200]}",
+            )
+        assets = resp.json()
+        return {"resource_id": resource_id, "assets": assets, "count": len(assets)}
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase: {exc}")
+
+
+@app.get("/api/resources/{resource_id}/assets/{asset_type}")
+async def get_resource_assets_by_type(resource_id: str, asset_type: str):
+    """
+    List visual assets of a specific type for a resource
+    (e.g. /api/resources/{id}/assets/graph).
+    """
+    headers = _supabase_headers()
+    endpoint = (
+        f"{SUPABASE_URL}/rest/v1/resource_assets"
+        f"?resource_id=eq.{resource_id}&asset_type=eq.{asset_type}"
+        f"&select=id,page_number,asset_type,storage_url,mime_type,width,height,"
+        f"bounding_box,caption,linked_question_id,content_verified,metadata,created_at"
+        f"&order=page_number.asc"
+    )
+    try:
+        resp = requests.get(endpoint, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Supabase query failed ({resp.status_code}): {resp.text[:200]}",
+            )
+        assets = resp.json()
+        return {
+            "resource_id": resource_id,
+            "asset_type": asset_type,
+            "assets": assets,
+            "count": len(assets),
+        }
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase: {exc}")
+
 @app.get("/api/question")
 async def get_question(resource_id: Optional[str] = None):
     # This simulates fetching a question and its examiner report hint from OpenKB

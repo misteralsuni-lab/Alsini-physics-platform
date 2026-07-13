@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { FileText, Network, Loader2, Maximize2, AlertCircle, X, ArrowUpRight } from 'lucide-react';
+import { FileText, Network, Loader2, Maximize2, AlertCircle, X, ArrowUpRight, ImageIcon, ZoomIn } from 'lucide-react';
 
 // --- Premium UI Tokens & Variants ---
 const containerVariants = {
@@ -21,6 +21,120 @@ const itemVariants = {
   hidden: { opacity: 0, y: 15 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } }
 };
+
+// --- Visual Asset Card ---
+const AssetCard = ({ asset, onZoom }) => {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      className="group relative rounded-2xl border border-white/10 bg-[#0A0A0A]/60 overflow-hidden"
+    >
+      {/* Asset image */}
+      <div className="relative flex items-center justify-center bg-white/95 min-h-[200px]">
+        {!isLoaded && !hasError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80">
+            <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
+          </div>
+        )}
+        {hasError ? (
+          <div className="flex flex-col items-center gap-2 p-8 text-gray-500">
+            <AlertCircle className="w-6 h-6 text-red-500/60" />
+            <span className="text-xs">Failed to load asset</span>
+          </div>
+        ) : (
+          <img
+            src={asset.storage_url}
+            alt={asset.caption || `${asset.asset_type} on page ${asset.page_number}`}
+            className={`max-w-full h-auto transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+            onLoad={() => setIsLoaded(true)}
+            onError={() => { setHasError(true); setIsLoaded(true); }}
+            loading="lazy"
+          />
+        )}
+      </div>
+
+      {/* Caption bar */}
+      <div className="p-4 border-t border-white/5">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-widest text-emerald-400/70 font-mono">
+              {asset.asset_type}
+            </span>
+            {asset.linked_question_id && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400/80 font-mono">
+                {asset.linked_question_id}
+              </span>
+            )}
+            <span className="text-[10px] text-gray-600 font-mono">
+              page {asset.page_number}
+            </span>
+          </div>
+          <button
+            onClick={() => onZoom(asset)}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10"
+            aria-label="Zoom asset"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+        </div>
+        {asset.caption && (
+          <p className="text-sm text-gray-300 font-light leading-relaxed">
+            {asset.caption}
+          </p>
+        )}
+        {asset.content_verified && (
+          <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-500/60">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/60" />
+            <span>Content verified</span>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
+// --- Asset Full-screen Zoom Modal ---
+const AssetZoomModal = ({ asset, onClose }) => (
+  <motion.div
+    className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-black/80 backdrop-blur-sm"
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    onClick={onClose}
+  >
+    <motion.div
+      className="relative max-w-5xl max-h-full flex flex-col bg-[#0A0A0A] border border-white/10 rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(16,185,129,0.15)]"
+      initial={{ scale: 0.9, y: 20 }}
+      animate={{ scale: 1, y: 0 }}
+      exit={{ scale: 0.9, y: 20 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 z-10 p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-white/10 bg-[#050505]/80"
+        aria-label="Close zoom"
+      >
+        <X className="w-5 h-5" />
+      </button>
+      <div className="flex-1 flex items-center justify-center bg-white/95 overflow-auto">
+        <img
+          src={asset.storage_url}
+          alt={asset.caption || `${asset.asset_type} on page ${asset.page_number}`}
+          className="max-w-full max-h-full h-auto"
+        />
+      </div>
+      {asset.caption && (
+        <div className="p-4 border-t border-white/5">
+          <p className="text-sm text-gray-300 font-light">{asset.caption}</p>
+        </div>
+      )}
+    </motion.div>
+  </motion.div>
+);
 
 // --- Concept Pop-up Box ---
 const ConceptPopup = ({ block, onClose, onSelectRelated }) => (
@@ -89,9 +203,11 @@ const ConceptPopup = ({ block, onClose, onSelectRelated }) => (
 const HybridDocumentViewer = ({ resourceId }) => {
   const [viewMode, setViewMode] = useState('document'); // 'document' | 'interactive'
   const [data, setData] = useState(null);
+  const [assets, setAssets] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedIdx, setSelectedIdx] = useState(null);
+  const [zoomAsset, setZoomAsset] = useState(null);
 
   const blocks = React.useMemo(() => {
     const c = data?.content;
@@ -117,20 +233,37 @@ const HybridDocumentViewer = ({ resourceId }) => {
       setIsLoading(false);
       return;
     }
+
     const fetchResourceData = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const { data: resourceData, error: fetchError } = await supabase
-          .from('resources')
-          .select('content, title')
-          .eq('id', resourceId)
-          .single();
+        // Fetch resource content AND visual assets in parallel
+        const [resourceRes, assetsRes] = await Promise.all([
+          supabase
+            .from('resources')
+            .select('content, title, content_markdown')
+            .eq('id', resourceId)
+            .single(),
+          supabase
+            .from('resource_assets')
+            .select('id,page_number,asset_type,storage_url,mime_type,width,height,bounding_box,caption,linked_question_id,content_verified,metadata')
+            .eq('resource_id', resourceId)
+            .order('page_number', { ascending: true }),
+        ]);
 
-        if (fetchError) throw fetchError;
-        setData(resourceData);
+        if (resourceRes.error) throw resourceRes.error;
+        setData(resourceRes.data);
+
+        // Assets may be empty or error if RLS blocks — handle gracefully
+        if (assetsRes.error) {
+          console.warn("Could not fetch resource_assets:", assetsRes.error.message);
+          setAssets([]);
+        } else {
+          setAssets(assetsRes.data || []);
+        }
       } catch (err) {
-        console.error("Error fetching OpenKB data:", err);
+        console.error("Error fetching resource data:", err);
         setError("Failed to fetch knowledge graph data. Please verify the resource ID.");
       } finally {
         setIsLoading(false);
@@ -155,7 +288,14 @@ const HybridDocumentViewer = ({ resourceId }) => {
             <h2 className="text-xl font-drama tracking-wide text-gray-100">
               {data?.title || 'OpenKB Interactive Resource'}
             </h2>
-            <p className="text-xs text-gray-500 uppercase tracking-widest mt-1">Hybrid Architecture Viewer</p>
+            <p className="text-xs text-gray-500 uppercase tracking-widest mt-1">
+              Hybrid Architecture Viewer
+              {assets.length > 0 && (
+                <span className="ml-2 text-emerald-400/50">
+                  · {assets.length} visual {assets.length === 1 ? 'asset' : 'assets'}
+                </span>
+              )}
+            </p>
           </div>
         </div>
 
@@ -218,6 +358,31 @@ const HybridDocumentViewer = ({ resourceId }) => {
                 exit="exit"
                 className="max-w-4xl mx-auto"
               >
+                {/* Visual Assets Section */}
+                {assets.length > 0 && (
+                  <motion.div variants={itemVariants} className="mb-8">
+                    <div className="flex items-center gap-2 mb-4">
+                      <ImageIcon className="w-5 h-5 text-emerald-400" />
+                      <h3 className="text-lg font-drama text-emerald-400">
+                        Visual Assets
+                      </h3>
+                      <span className="text-xs text-gray-500 ml-2">
+                        {assets.length} extracted from source PDF
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {assets.map((asset) => (
+                        <AssetCard
+                          key={asset.id}
+                          asset={asset}
+                          onZoom={setZoomAsset}
+                        />
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Markdown content */}
                 <div className="prose prose-invert prose-emerald max-w-none">
                   {data?.content_markdown ? (
                     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
@@ -226,8 +391,16 @@ const HybridDocumentViewer = ({ resourceId }) => {
                   ) : (
                     <div className="p-8 border border-dashed border-white/10 rounded-2xl text-center bg-[#0A0A0A]/50">
                       <FileText className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                      <h3 className="text-gray-300 text-lg mb-2">Markdown Unvailable</h3>
-                      <p className="text-gray-500 text-sm">Switch to the Interactive view to explore the raw JSON data.</p>
+                      <h3 className="text-gray-300 text-lg mb-2">
+                        {assets.length > 0
+                          ? "Markdown content not yet generated"
+                          : "No content available"}
+                      </h3>
+                      <p className="text-gray-500 text-sm">
+                        {assets.length > 0
+                          ? "Switch to Interactive view to explore the knowledge graph, or view the visual assets above."
+                          : "Switch to the Interactive view to explore the raw JSON data."}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -250,6 +423,48 @@ const HybridDocumentViewer = ({ resourceId }) => {
                     Click a concept node to open its equation and properties. Related concepts link to each other.
                   </p>
                 </motion.div>
+
+                {/* Linked visual assets (shown in interactive mode too) */}
+                {assets.length > 0 && (
+                  <motion.div variants={itemVariants} className="mb-8">
+                    <div className="flex items-center gap-2 mb-4">
+                      <ImageIcon className="w-4 h-4 text-emerald-400/70" />
+                      <h4 className="text-sm font-medium text-gray-300 uppercase tracking-wider">
+                        Linked Visual Assets
+                      </h4>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {assets.map((asset) => (
+                        <button
+                          key={asset.id}
+                          onClick={() => setZoomAsset(asset)}
+                          className="group relative rounded-xl border border-white/10 bg-[#0A0A0A]/60 overflow-hidden hover:border-emerald-500/40 transition-all"
+                        >
+                          <div className="aspect-video flex items-center justify-center bg-white/95">
+                            <img
+                              src={asset.storage_url}
+                              alt={asset.caption || asset.asset_type}
+                              className="max-w-full max-h-full h-auto"
+                              loading="lazy"
+                            />
+                          </div>
+                          <div className="p-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] uppercase text-emerald-400/70 font-mono">
+                                {asset.asset_type}
+                              </span>
+                              {asset.linked_question_id && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/80 font-mono">
+                                  {asset.linked_question_id}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
 
                 {blocks.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -302,6 +517,13 @@ const HybridDocumentViewer = ({ resourceId }) => {
           </AnimatePresence>
         )}
       </div>
+
+      {/* Asset Zoom Modal */}
+      <AnimatePresence>
+        {zoomAsset && (
+          <AssetZoomModal asset={zoomAsset} onClose={() => setZoomAsset(null)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -108,6 +108,35 @@ def verify_asset_rows(resource_id: str, supabase_url: str, supabase_key: str) ->
     return resp.json()
 
 
+def delete_existing_assets(resource_id: str, supabase_url: str,
+                           supabase_key: str) -> int:
+    """
+    Delete existing resource_assets rows for a resource_id (idempotency).
+
+    Storage objects are overwritten via x-upsert on re-upload, so we only
+    need to clean DB rows.  Returns the count of deleted rows.
+
+    This is safe because ON DELETE CASCADE on the FK means no orphans.
+    """
+    existing = verify_asset_rows(resource_id, supabase_url, supabase_key)
+    if not existing:
+        return 0
+
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    endpoint = f"{supabase_url}/rest/v1/resource_assets?resource_id=eq.{resource_id}"
+    resp = requests.delete(endpoint, headers=headers)
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(
+            f"DB delete failed ({resp.status_code}): {resp.text[:300]}"
+        )
+    return len(existing)
+
+
 def verify_storage_url(storage_url: str) -> bool:
     """Verify that a storage URL is publicly accessible (HTTP 200 with content)."""
     try:
@@ -150,6 +179,11 @@ def run_pipeline(pdf_path: str, resource_id: str,
     if not assets:
         print("  WARNING: No educational assets found. Pipeline terminating.")
         return []
+
+    # --- Stage 1b: Idempotency — clean up old DB rows before re-insert ---
+    deleted = delete_existing_assets(resource_id, supabase_url, supabase_key)
+    if deleted:
+        print(f"  Cleaned up {deleted} existing asset row(s) (idempotency).")
 
     # --- Stage 2: Upload to Storage + insert into DB ---
     print(f"\nStage 2: Uploading {len(assets)} asset(s) to Supabase Storage...")
