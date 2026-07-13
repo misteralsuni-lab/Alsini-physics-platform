@@ -1,0 +1,118 @@
+{
+  "pipeline_a": {
+    "storage": {
+      "method": "Structured rows in Supabase tables (resources, activities, questions)",
+      "schema_columns": "id, specification_point_id, title, content (JSON), created_at",
+      "graph_asset_stored": true,
+      "graph_asset_in_schema": false,
+      "status": "PASS",
+      "evidence": "Graph asset path stored inside resources.content JSON. But mig_1_tables.sql has NO image/asset column \u2014 resources only has (id, specification_point_id, title, created_at). The 'content' column was added ad-hoc outside migrations."
+    },
+    "relationships": {
+      "method": "Foreign keys in SQL + relationship map in JSON content",
+      "relationships_preserved": 5,
+      "status": "PASS",
+      "evidence": "5 relationships mapped: Q4\u2192graph, Q5a\u2192table_q5, Q5b\u2192eq_acceleration, Q6a\u2192eq_v2_uas, Q4b\u2192eq_avg_speed"
+    },
+    "retriever": {
+      "method": "SQL: SELECT * FROM resources WHERE id = ?",
+      "can_find_q4": true,
+      "can_find_graph": true,
+      "can_find_equation": true,
+      "can_find_table": true,
+      "can_interpret_graph": false,
+      "status": "PARTIAL",
+      "evidence": "Relational retrieval finds Q4 and its linked graph asset PATH. But SQL cannot interpret graph pixel values \u2014 it returns the asset reference, not the graph's meaning. An LLM with vision is still needed to read values from the graph image."
+    },
+    "backend_api": {
+      "method": "FastAPI endpoint returns resources.content JSON to frontend",
+      "returns_graph_path": true,
+      "returns_graph_image_bytes": false,
+      "status": "PARTIAL",
+      "evidence": "FastAPI would return the JSON content containing graph path. But there is NO endpoint to serve the graph image itself. The path points to a local filesystem location the frontend cannot access."
+    },
+    "frontend": {
+      "component": "HybridDocumentViewer.jsx",
+      "content_markdown_rendered": false,
+      "concept_nodes_rendered": true,
+      "graph_image_rendered": false,
+      "equations_rendered": true,
+      "tables_rendered": false,
+      "status": "FAIL",
+      "evidence": "HybridDocumentViewer.jsx (lines 89-309) has two modes: (1) Document mode renders content_markdown via ReactMarkdown \u2014 but content_markdown is NULL \u2192 'Markdown Unavailable' placeholder (line 227-231). (2) Interactive mode renders concept nodes as clickable cards (lines 254-284) with formula in ConceptPopup (lines 53-62). There is NO <img> tag anywhere in the component. Graph assets cannot be displayed."
+    },
+    "experiment_answers": {
+      "1_reconstruct_worksheet": "NO \u2014 text is preserved but document layout is lost",
+      "2_graphs_preserved": "PARTIAL \u2014 graph image extracted and path stored, but frontend CANNOT render it (no <img> tag in viewer)",
+      "3_diagrams_preserved": "NO \u2014 no diagram rendering capability in viewer",
+      "4_equations_preserved": "YES \u2014 LaTeX equations render via KaTeX in concept popups",
+      "5_tables_preserved": "NO \u2014 data table content stored in JSON but viewer has no table rendering component",
+      "6_practical_assets_preserved": "PARTIAL \u2014 table data stored but blank plotting grid on page 3 not extracted",
+      "7_ai_answer_graph_questions": "NO \u2014 relational retrieval returns graph path but cannot compute values from graph pixels",
+      "8_frontend_render_assets": "NO \u2014 viewer renders concept cards and equations only; no graph, table, or diagram rendering",
+      "9_information_lost": "YES \u2014 graph visual, table structure, document layout, blank plotting grid, and table-to-question visual linkage are all lost"
+    }
+  },
+  "pipeline_b": {
+    "storage": {
+      "method": "Same structured rows + embedding vectors in pgvector column",
+      "schema_addition": "ALTER TABLE resources ADD COLUMN embedding vector(1536) \u2014 requires pgvector extension",
+      "graph_asset_stored": true,
+      "graph_asset_in_schema": false,
+      "status": "PASS",
+      "evidence": "Same structured output stored. pgvector adds embedding column for semantic search. Graph asset path still in JSON content. The storage gap (no image column) is identical to Pipeline A."
+    },
+    "embeddings": {
+      "method": "Text chunks embedded (simulated 1536-dim, real would use text-embedding-3-small or NVIDIA Nemotron)",
+      "chunks_created": 7,
+      "graph_ref_in_chunks": true,
+      "status": "PASS",
+      "evidence": "7 chunks created (one per question). Q4 chunk text includes '[Linked graph: page2_distance_time_graph]' and metadata.linked_graph field. The graph REFERENCE is embedded, but the graph IMAGE itself cannot be embedded in a text vector."
+    },
+    "relationships": {
+      "method": "Same FK relationships + semantic similarity for discovery",
+      "relationships_preserved": 5,
+      "status": "PASS",
+      "evidence": "Same 5 relationships. pgvector adds ability to find SIMILAR questions but does not change relationship storage."
+    },
+    "retriever": {
+      "method": "SELECT * FROM resources ORDER BY embedding <=> $query_vec LIMIT 5",
+      "can_find_q4": true,
+      "can_find_graph": true,
+      "can_find_equation": true,
+      "can_find_table": true,
+      "can_interpret_graph": false,
+      "semantic_advantage": "Better at finding Q4 when user query is paraphrased (e.g., 'how fast did Bolt run' finds Q4 without exact keyword match)",
+      "status": "PARTIAL",
+      "evidence": "Semantic search is better at FINDING the right question chunk. But once found, it retrieves the same graph asset PATH. pgvector cannot interpret graph pixel values \u2014 it operates on text embeddings only. The bottleneck (graph interpretation) is IDENTICAL to Pipeline A."
+    },
+    "backend_api": {
+      "method": "FastAPI calls Supabase RPC for pgvector similarity search, returns chunks + metadata",
+      "returns_graph_path": true,
+      "returns_graph_image_bytes": false,
+      "status": "PARTIAL",
+      "evidence": "API would return semantically matched chunks with graph path in metadata. Same gap: no endpoint to serve graph image bytes to frontend."
+    },
+    "frontend": {
+      "component": "SAME HybridDocumentViewer.jsx \u2014 no changes",
+      "content_markdown_rendered": false,
+      "concept_nodes_rendered": true,
+      "graph_image_rendered": false,
+      "equations_rendered": true,
+      "tables_rendered": false,
+      "status": "FAIL",
+      "evidence": "Pipeline B uses the SAME frontend viewer. Adding pgvector changes the RETRIEVAL mechanism but the RENDERING layer is unchanged. The graph still cannot be displayed because HybridDocumentViewer has no <img> rendering capability (lines 89-309, no image tag found)."
+    },
+    "experiment_answers": {
+      "1_reconstruct_worksheet": "NO \u2014 same as Pipeline A, document layout lost",
+      "2_graphs_preserved": "PARTIAL \u2014 same as Pipeline A, graph extracted and path stored, but frontend CANNOT render it",
+      "3_diagrams_preserved": "NO \u2014 same viewer, no diagram rendering",
+      "4_equations_preserved": "YES \u2014 same KaTeX rendering in concept popups",
+      "5_tables_preserved": "NO \u2014 same viewer, no table rendering",
+      "6_practical_assets_preserved": "PARTIAL \u2014 same as Pipeline A",
+      "7_ai_answer_graph_questions": "NO \u2014 same limitation, pgvector is text-based and cannot interpret graph pixels",
+      "8_frontend_render_assets": "NO \u2014 same viewer, same rendering gaps",
+      "9_information_lost": "YES \u2014 same information loss as Pipeline A. pgvector improves FINDING content but does not improve RENDERING content."
+    }
+  }
+}

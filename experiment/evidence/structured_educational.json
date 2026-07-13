@@ -1,0 +1,282 @@
+{
+  "resource_id": "5729d034-a6c7-4f35-b81c-fcac447289c7",
+  "source_pdf": "/home/alsuni/Alsini-physics-platform/raw_materials/IGCSE_Physics_Worksheet 1_Movement and Position.pdf",
+  "page_count": 3,
+  "questions": [
+    {
+      "qid": "Q1a",
+      "page": 1,
+      "type": "completion",
+      "text": "Complete the table below with the correct corresponding quantities and units.",
+      "linked_table": "table_q1a",
+      "linked_graph": null,
+      "linked_equation": null
+    },
+    {
+      "qid": "Q1b",
+      "page": 1,
+      "type": "short_answer",
+      "text": "List which of the quantities above are vectors.",
+      "linked_table": null,
+      "linked_graph": null,
+      "linked_equation": null
+    },
+    {
+      "qid": "Q2",
+      "page": 1,
+      "type": "reasoning",
+      "text": "Sarah and Maisie analysing 1500m results. Is displacement 1500m or 0m?",
+      "linked_table": null,
+      "linked_graph": null,
+      "linked_equation": null
+    },
+    {
+      "qid": "Q3",
+      "page": 1,
+      "type": "definition",
+      "text": "Describe the difference between a scalar and a vector quantity.",
+      "linked_table": null,
+      "linked_graph": null,
+      "linked_equation": null
+    },
+    {
+      "qid": "Q4",
+      "page": 2,
+      "type": "graph_analysis",
+      "text": "Distance-time graph of Usain Bolt's 100m training run.",
+      "linked_table": null,
+      "linked_graph": "page2_distance_time_graph",
+      "linked_equation": "eq_avg_speed",
+      "sub_questions": [
+        "4a: describe motion first 2s",
+        "4b: calculate average speed",
+        "4c: calculate max speed",
+        "4d: suggest reason results differ"
+      ]
+    },
+    {
+      "qid": "Q5",
+      "page": 2,
+      "type": "practical_data_analysis",
+      "text": "Paul investigates velocity of a ball down a ramp using a data logger.",
+      "linked_table": "table_q5",
+      "linked_graph": null,
+      "linked_equation": "eq_acceleration",
+      "sub_questions": [
+        "5a: plot velocity-time graph",
+        "5b: calculate acceleration",
+        "5c: calculate length of ramp"
+      ]
+    },
+    {
+      "qid": "Q6",
+      "page": 3,
+      "type": "calculation",
+      "text": "McLaren F1 engines testing top speed from rest. v2 = u2 + 2as.",
+      "linked_table": "table_q6",
+      "linked_graph": null,
+      "linked_equation": "eq_v2_uas",
+      "sub_questions": [
+        "6a: calculate final velocities for engines A-D",
+        "6b: how to reduce recording errors"
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "id": "table_q1a",
+      "qid": "Q1a",
+      "page": 1,
+      "type": "completion_table",
+      "headers": [
+        "Quantity",
+        "Units"
+      ],
+      "description": "Complete the table with quantities and units"
+    },
+    {
+      "id": "table_q5",
+      "qid": "Q5",
+      "page": 2,
+      "type": "data_table",
+      "headers": [
+        "Data logger position",
+        "Velocity/m/s",
+        "Time/s"
+      ],
+      "rows_complete": [
+        [
+          "A",
+          "0.9",
+          "0.5"
+        ],
+        [
+          "B",
+          "2.9",
+          "1.0"
+        ],
+        [
+          "C",
+          "6.0",
+          "1.5"
+        ],
+        [
+          "D",
+          "9.8",
+          "2.0"
+        ],
+        [
+          "E",
+          "14.8",
+          "2.5"
+        ]
+      ],
+      "description": "Paul's velocity data at 5 positions along a ramp"
+    },
+    {
+      "id": "table_q6",
+      "qid": "Q6",
+      "page": 3,
+      "type": "completion_table",
+      "headers": [
+        "Engine",
+        "Distance travelled/m",
+        "Final velocity/m/s"
+      ],
+      "rows_partial": [
+        [
+          "A",
+          "335",
+          "?"
+        ],
+        [
+          "B",
+          "302",
+          "?"
+        ],
+        [
+          "C",
+          "290",
+          "?"
+        ],
+        [
+          "D",
+          "321",
+          "?"
+        ]
+      ],
+      "description": "F1 engine test data \u2014 final velocities to be calculated using v2 = u2 + 2as"
+    }
+  ],
+  "equations": [
+    {
+      "id": "eq_avg_speed",
+      "qid": "Q4b",
+      "page": 2,
+      "latex": "v = \\frac{d}{t}",
+      "description": "average speed = distance moved / time taken",
+      "context": "Usain Bolt average speed calculation"
+    },
+    {
+      "id": "eq_max_speed",
+      "qid": "Q4c",
+      "page": 2,
+      "latex": "v_{max} = \\frac{\\Delta d}{\\Delta t}",
+      "description": "maximum speed from steepest gradient of distance-time graph",
+      "context": "From graph gradient"
+    },
+    {
+      "id": "eq_acceleration",
+      "qid": "Q5b",
+      "page": 3,
+      "latex": "a = \\frac{\\Delta v}{\\Delta t}",
+      "description": "acceleration = change in velocity / time taken",
+      "context": "Acceleration of trolley down ramp"
+    },
+    {
+      "id": "eq_v2_uas",
+      "qid": "Q6a",
+      "page": 3,
+      "latex": "v^2 = u^2 + 2as",
+      "description": "final speed squared = initial speed squared + 2 x acceleration x distance",
+      "context": "McLaren F1 engine test"
+    },
+    {
+      "id": "eq_ramp_length",
+      "qid": "Q5c",
+      "page": 3,
+      "latex": "s = \\frac{1}{2}(u+v)t",
+      "description": "distance = area under velocity-time graph",
+      "context": "Calculate length of ramp from v-t graph"
+    }
+  ],
+  "graphs": [
+    {
+      "id": "page2_distance_time_graph",
+      "path": "/home/alsuni/Alsini-physics-platform/experiment/evidence/page2_graphFINAL.png",
+      "raw_embedded_path": "/home/alsuni/Alsini-physics-platform/experiment/evidence/page2_graphRAW_embedded.png",
+      "source_page": 2,
+      "type": "raster_image",
+      "original_pdf_image_size": "557x360",
+      "context": "Distance-time graph of Usain Bolt's 100m training run (Q4, page 2)",
+      "content_verified": true,
+      "non_white_pct": 2.52,
+      "raw_non_white_pct": 2.8,
+      "horizontal_coverage": 0.8778,
+      "vertical_coverage": 0.9623
+    }
+  ],
+  "page_images": {
+    "0": {
+      "path": "/home/alsuni/Alsini-physics-platform/experiment/evidence/page_1_render.png",
+      "width": 1654,
+      "height": 2339,
+      "size_bytes": 168291
+    },
+    "1": {
+      "path": "/home/alsuni/Alsini-physics-platform/experiment/evidence/page_2_render.png",
+      "width": 1654,
+      "height": 2339,
+      "size_bytes": 196696
+    },
+    "2": {
+      "path": "/home/alsuni/Alsini-physics-platform/experiment/evidence/page_3_render.png",
+      "width": 1654,
+      "height": 2339,
+      "size_bytes": 182908
+    }
+  },
+  "full_text": " \n\u00a9 Pearson Education Ltd 2018. Copying permitted for purchasing institution only. This material is not copyright free. \n \nChapter 1: Movement and Position  \n1 a  Complete the table below with the correct corresponding quantities and units. \n \nQuantity \nUnits \n \nm \n \ndisplacement \n \n \nspeed \n \n \nvelocity \n \n \n \nm/s2 \n \n \n \nb  List which of the quantities above are vectors. \n \n \n \n \n2 Sarah and Maisie are analysing data from their school sports day. Looking at the 1500 m results \n \nfor Stephen, Maisie believes that Stephen\u2019s displacement from the start line is 1500 m. Sarah \n \nsays that she is incorrect and that his displacement from the start is actually 0 m. Which of the \n \nstudents is correct? Give reasoning for your answer. \n \n \n \n \n \n \n3 Velocity is often described as a vector quantity. Speed is not. Describe the difference between a \n \nscalar and a vector quantity. \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n\n\n---PAGE BREAK---\n\n \n\u00a9 Pearson Education Ltd 2018. Copying permitted for purchasing institution only. This material is not copyright free. \n \n4 Usain Bolt has been credited as the fastest man in the world over 100 m. Below is a distance\u2013\n \ntime graph of one of his fastest training runs. \n \n \n \n \na  Describe Usain\u2019s motion during the first 2 seconds. \n \n \n \n \nb  Using the graph above, calculate Usain Bolt\u2019s average speed for the race. \n \n \n \n \n \n \nc  Now calculate his maximum speed. \n \n \n \n \n \n \nd  Suggest one reason why these results differ? \n \n \n \n5 Paul was asked to investigate the velocity of a ball as it rolled down a tilted ramp. He used a \n \ndata logger at five equally spaced intervals along the ramp to record its velocity at particular \n \npoints. The results he recorded are in the table below. \n \nData logger \nposition  \nA \nB \nC \nD \nE \nVelocity/m/s \n0.9 \n2.9 \n6.0 \n9.8 \n14.8 \nTime/s \n0.5 \n1 \n1.5 \n2.0 \n2.5 \n \n \n \n \n \n\n\n---PAGE BREAK---\n\n \n\u00a9 Pearson Education Ltd 2018. Copying permitted for purchasing institution only. This material is not copyright free. \n \n \na  Using the data, plot a velocity\u2013time graph for Paul\u2019s results.  \n \n \n \n \n \nb  Calculate the acceleration of the trolley down the ramp. Include the units in your answer.  \n \n \n \n \nc  If data logger E is at the end of the ramp, calculate the length of the ramp Paul used. \n \n \n \n6 McLaren racing engineers are testing a variety of new engines in their latest model F1 car. They \n \nare testing which engine has the greatest top speed from rest. The engines all accelerate on \n \naverage at 14.5 m/s2. The resulting distances are recorded in the table below. \nEngine \nDistance travelled/m \nFinal velocity/m/s \nA \n335 \n \n \nB \n302 \n \n \nC \n290 \n \n \nD \n321 \n \n \n \n \na  Using the data in the table and the equation v2 = u2 + 2as calculate the final velocities. \n \n \n \n \nb  One of the engineers noted that each engine\u2019s results were recorded only once. How   \n \n \n \ncould any errors in the recording of results be reduced? \n",
+  "relationships": [
+    {
+      "from": "Q4",
+      "type": "depends_on",
+      "to": "page2_distance_time_graph",
+      "evidence": "Q4 asks students to read values from the distance-time graph"
+    },
+    {
+      "from": "Q5a",
+      "type": "depends_on",
+      "to": "table_q5",
+      "evidence": "Q5a asks students to PLOT a velocity-time graph FROM the data table"
+    },
+    {
+      "from": "Q5b",
+      "type": "depends_on",
+      "to": "eq_acceleration",
+      "evidence": "Requires the formula a = delta_v/delta_t"
+    },
+    {
+      "from": "Q6a",
+      "type": "depends_on",
+      "to": "eq_v2_uas",
+      "evidence": "Requires v2 = u2 + 2as formula"
+    },
+    {
+      "from": "Q4b",
+      "type": "depends_on",
+      "to": "eq_avg_speed",
+      "evidence": "Q4b asks to use graph to calculate average speed"
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "parser_evidence": "14 evidence points (see structured_output.json)",
+  "storage_and_retrieval_evidence": [
+    {
+      "stage": "Storage",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "Stored 1 resource, 7 activities"
+    },
+    {
+      "stage": "Storage",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "Stored 1 resource, 7 activities"
+    },
+    {
+      "stage": "Storage-GraphAsset",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "Graph asset path stored in metadata: True"
+    },
+    {
+      "stage": "Storage-GraphAsset",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "Graph asset path stored in metadata: True"
+    },
+    {
+      "stage": "Storage-SchemaCheck",
+      "pipeline": "SHARED",
+      "status": "FAIL",
+      "detail": "Current schema (mig_1_tables.sql) has NO image/asset storage column. resources table only has: id, specification_point_id, title, created_at. The 'content' JSON column was added ad-hoc \u2014 not in migration."
+    },
+    {
+      "stage": "Retriever",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "Resource retrieved by ID: IGCSE Physics Worksheet 1: Movement and Position"
+    },
+    {
+      "stage": "Retriever-QuestionMatch",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "Q4 found by qid lookup: linked_graph=page2_graph_crop"
+    },
+    {
+      "stage": "Retriever-GraphAsset",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "Graph asset found via metadata: page2_graph_crop.png, exists=True"
+    },
+    {
+      "stage": "Retriever-Equation",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "Equation linked to Q4b: v = \\frac{d}{t}"
+    },
+    {
+      "stage": "Retriever-Answer",
+      "pipeline": "PIPELINE A",
+      "status": "PARTIAL",
+      "detail": "Retrieves graph asset + equation, but cannot compute answer without vision interpretation"
+    },
+    {
+      "stage": "Frontend-Markdown",
+      "pipeline": "PIPELINE A",
+      "status": "FAIL",
+      "detail": "content_markdown is None \u2192 viewer shows 'Markdown Unavailable' placeholder"
+    },
+    {
+      "stage": "Frontend-ConceptNodes",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "Concept nodes from JSON content are renderable as clickable cards"
+    },
+    {
+      "stage": "Frontend-GraphImage",
+      "pipeline": "PIPELINE A",
+      "status": "FAIL",
+      "detail": "HybridDocumentViewer has NO <img> tag or image rendering for graph assets. Graph exists in storage as PNG but viewer cannot display it."
+    },
+    {
+      "stage": "Frontend-Equations",
+      "pipeline": "PIPELINE A",
+      "status": "PASS",
+      "detail": "KaTeX renders equations in concept popup (formula field)"
+    },
+    {
+      "stage": "Frontend-Tables",
+      "pipeline": "PIPELINE A",
+      "status": "FAIL",
+      "detail": "HybridDocumentViewer has no table rendering component"
+    },
+    {
+      "stage": "Embeddings-Chunks",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "Generated 7 chunk embeddings (simulated 1536-dim vectors)"
+    },
+    {
+      "stage": "Embeddings-GraphRef",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "Q4 chunk includes graph reference in text AND metadata.linked_graph field"
+    },
+    {
+      "stage": "Retriever-SemanticSearch",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "Semantic search retrieves chunk_Q3 (Q4 \u2014 graph question)"
+    },
+    {
+      "stage": "Retriever-GraphAsset",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "Graph asset retrieved from chunk metadata: page2_graph_crop.png, exists=True"
+    },
+    {
+      "stage": "Retriever-Answer",
+      "pipeline": "PIPELINE B",
+      "status": "PARTIAL",
+      "detail": "Semantic search finds Q4 better than relational, but still cannot interpret graph pixels"
+    },
+    {
+      "stage": "Frontend-Markdown",
+      "pipeline": "PIPELINE B",
+      "status": "FAIL",
+      "detail": "content_markdown is None \u2192 same 'Markdown Unavailable' placeholder"
+    },
+    {
+      "stage": "Frontend-ConceptNodes",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "Concept nodes renderable (same as Pipeline A)"
+    },
+    {
+      "stage": "Frontend-GraphImage",
+      "pipeline": "PIPELINE B",
+      "status": "FAIL",
+      "detail": "SAME HybridDocumentViewer \u2014 NO <img> rendering for graph assets"
+    },
+    {
+      "stage": "Frontend-Equations",
+      "pipeline": "PIPELINE B",
+      "status": "PASS",
+      "detail": "KaTeX renders equations (same as Pipeline A)"
+    },
+    {
+      "stage": "Frontend-Tables",
+      "pipeline": "PIPELINE B",
+      "status": "FAIL",
+      "detail": "SAME viewer \u2014 no table rendering component"
+    }
+  ],
+  "pipeline_a_result": {
+    "question": "What is Usain Bolt's average speed from the distance-time graph?",
+    "approach": "Relational lookup \u2192 found Q4 \u2192 found graph asset path \u2192 found equation",
+    "graph_asset": "/home/alsuni/Alsini-physics-platform/experiment/evidence/page2_graph_crop.png",
+    "equation": "v = \\frac{d}{t}",
+    "can_answer": "PARTIAL \u2014 can provide the graph image, equation, and question text to frontend, but relational retrieval itself cannot interpret graph values. An LLM with vision would need the graph image as input to compute the answer."
+  },
+  "pipeline_b_result": {
+    "question": "What is Usain Bolt's average speed from the distance-time graph?",
+    "approach": "Semantic search \u2192 Q4 chunk \u2192 graph asset from metadata \u2192 equation from metadata",
+    "graph_asset": "/home/alsuni/Alsini-physics-platform/experiment/evidence/page2_graph_crop.png",
+    "equation": "v = \\frac{d}{t}",
+    "can_answer": "PARTIAL \u2014 same as Pipeline A. Semantic search is better at FINDING the right question chunk, but cannot interpret graph pixel values either. The bottleneck is NOT retrieval \u2014 it's graph interpretation (vision)."
+  },
+  "frontend_a": {
+    "content_markdown_available": false,
+    "concept_nodes_renderable": true,
+    "graph_image_renderable": false,
+    "equation_renderable": true,
+    "table_renderable": false
+  },
+  "frontend_b": {
+    "content_markdown_available": false,
+    "concept_nodes_renderable": true,
+    "graph_image_renderable": false,
+    "equation_renderable": true,
+    "table_renderable": false
+  }
+}
