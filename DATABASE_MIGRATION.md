@@ -15,7 +15,7 @@ A single migration file creates the `resource_assets` table and adds the
 | Migration | File | Description |
 |---|---|---|
 | mig_1_tables | (already applied) | Creates base tables: resources, chapters, units, etc. |
-| **mig_5_resource_assets** | `scratch/mig_5_resource_assets.sql` | Creates resource_assets table + indexes + RLS + content_markdown column |
+| **mig_5_resource_assets** | `migrations/mig_5_resource_assets.sql` | Creates resource_assets table + indexes + RLS + content_markdown column |
 
 Note: Migrations 2–4 were not part of this project's scope. The numbering
 follows the convention in the existing codebase.
@@ -199,7 +199,7 @@ SELECT policyname, cmd FROM pg_policies WHERE tablename='resource_assets';
 
 The migration SQL file is at:
 ```
-scratch/mig_5_resource_assets.sql
+migrations/mig_5_resource_assets.sql
 ```
 
 It was applied via the Supabase Management API (`POST /v1/projects/{ref}/database/query`)
