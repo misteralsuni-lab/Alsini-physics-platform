@@ -269,6 +269,238 @@ async def get_resource_assets_by_type(resource_id: str, asset_type: str):
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"Network error reaching Supabase: {exc}")
 
+# -------------------------------------------------------------------
+# Hybrid Retrieval Endpoints (Session 2 — Hybrid Retrieval Foundation)
+# -------------------------------------------------------------------
+
+# Embedding model constants (must match pipeline/embedding_pipeline.py)
+EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
+EMBED_DIM = 1024
+
+
+def _embed_query(text: str) -> list[float]:
+    """Embed a natural-language query via NVIDIA NV-EmbedQA-E5-V5."""
+    if not nvidia_client:
+        raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
+    resp = nvidia_client.embeddings.create(
+        model=EMBED_MODEL,
+        input=text,
+        encoding_format="float",
+        extra_body={"input_type": "query", "truncate": "END"},
+    )
+    return resp.data[0].embedding
+
+
+def _vector_to_pg_str(vec: list[float]) -> str:
+    """Convert a float list to a pgvector literal: [0.1,0.2,...]"""
+    return f"[{','.join(str(round(v, 8)) for v in vec)}]"
+
+
+class SearchRequest(BaseModel):
+    query: str
+    match_count: int = 10
+    filter_resource_id: Optional[str] = None
+
+
+class HybridSearchRequest(BaseModel):
+    query: str
+    match_count: int = 10
+    resource_id: Optional[str] = None
+    # Relational filters
+    spec_point_id: Optional[str] = None
+    chunk_type: Optional[str] = None
+
+
+@app.post("/api/search")
+async def semantic_search(request: SearchRequest):
+    """
+    Pure vector (semantic) search over resource_chunks.
+
+    Embeds the query via NVIDIA NV-EmbedQA-E5-V5 and calls the
+    `match_resource_chunks` Postgres RPC function for cosine
+    similarity ranking.
+    """
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query is required.")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=500, detail="Supabase credentials not configured.")
+
+    # 1. Embed query
+    query_vec = _embed_query(request.query)
+    vec_str = _vector_to_pg_str(query_vec)
+
+    # 2. Call RPC function
+    headers = _supabase_headers()
+    rpc_body = {
+        "query_embedding": vec_str,
+        "match_count": request.match_count,
+    }
+    if request.filter_resource_id:
+        rpc_body["filter_resource_id"] = request.filter_resource_id
+
+    try:
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
+            headers=headers,
+            json=rpc_body,
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Vector search RPC failed ({resp.status_code}): {resp.text[:200]}",
+            )
+        results = resp.json()
+        return {
+            "query": request.query,
+            "results": results,
+            "count": len(results),
+            "search_type": "semantic",
+        }
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase: {exc}")
+
+
+@app.post("/api/search/hybrid")
+async def hybrid_search(request: HybridSearchRequest):
+    """
+    Combined relational + vector (semantic) search.
+
+    Runs both:
+      - Relational: filter resources by spec_point_id and/or chunk_type
+        via PostgREST on the resources / resource_chunks tables
+      - Vector: pgvector cosine similarity via match_resource_chunks RPC
+
+    Merges results, deduplicating by chunk id and keeping the higher
+    similarity score. Vector results that also appear in the relational
+    results get a relevance boost.
+    """
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query is required.")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=500, detail="Supabase credentials not configured.")
+
+    headers = _supabase_headers()
+
+    # --- 1. Vector search ---
+    query_vec = _embed_query(request.query)
+    vec_str = _vector_to_pg_str(query_vec)
+
+    rpc_body = {
+        "query_embedding": vec_str,
+        "match_count": request.match_count * 2,  # fetch more for merging
+    }
+    if request.resource_id:
+        rpc_body["filter_resource_id"] = request.resource_id
+
+    try:
+        rpc_resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
+            headers=headers,
+            json=rpc_body,
+            timeout=15,
+        )
+        if rpc_resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Vector search RPC failed ({rpc_resp.status_code}): {rpc_resp.text[:200]}",
+            )
+        vector_results = rpc_resp.json()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase (vector): {exc}")
+
+    # --- 2. Relational search (optional filters) ---
+    relational_results: list[dict] = []
+
+    # If we have chunk_type filter, fetch matching chunks relationally
+    if request.chunk_type and not request.resource_id:
+        try:
+            rel_endpoint = (
+                f"{SUPABASE_URL}/rest/v1/resource_chunks"
+                f"?chunk_type=eq.{request.chunk_type}"
+                f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
+                f"&limit={request.match_count * 2}"
+            )
+            rel_resp = requests.get(rel_endpoint, headers=headers, timeout=15)
+            if rel_resp.status_code == 200:
+                relational_results = rel_resp.json()
+        except requests.RequestException:
+            pass  # non-fatal — vector results still usable
+
+    # If we have spec_point_id, fetch resources by spec_point and their chunks
+    if request.spec_point_id:
+        try:
+            res_endpoint = (
+                f"{SUPABASE_URL}/rest/v1/resources"
+                f"?specification_point_id=eq.{request.spec_point_id}"
+                f"&select=id"
+            )
+            res_resp = requests.get(res_endpoint, headers=headers, timeout=15)
+            if res_resp.status_code == 200 and res_resp.json():
+                res_ids = [r["id"] for r in res_resp.json()]
+                # Fetch chunks for these resources
+                if res_ids:
+                    id_filter = ",".join(res_ids)
+                    chunk_endpoint = (
+                        f"{SUPABASE_URL}/rest/v1/resource_chunks"
+                        f"?resource_id=in.({id_filter})"
+                        f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
+                        f"&limit={request.match_count * 2}"
+                    )
+                    chunk_resp = requests.get(chunk_endpoint, headers=headers, timeout=15)
+                    if chunk_resp.status_code == 200:
+                        # Tag these as relational-only matches (no similarity score yet)
+                        for c in chunk_resp.json():
+                            c["similarity"] = None  # no vector score
+                        relational_results.extend(chunk_resp.json())
+        except requests.RequestException:
+            pass
+
+    # --- 3. Merge & deduplicate ---
+    merged: dict[str, dict] = {}
+
+    # Add vector results first (they have similarity scores)
+    for r in vector_results:
+        chunk_id = r.get("id")
+        if chunk_id:
+            r["source"] = "vector"
+            r["boosted"] = False
+            merged[chunk_id] = r
+
+    # Add relational results, boosting existing entries
+    for r in relational_results:
+        chunk_id = r.get("id")
+        if chunk_id in merged:
+            # Already in vector results — boost it
+            existing = merged[chunk_id]
+            if existing.get("similarity") is not None:
+                existing["similarity"] = min(1.0, existing["similarity"] + 0.1)
+            existing["boosted"] = True
+            existing["source"] = "both"
+        else:
+            r["source"] = "relational"
+            r["boosted"] = False
+            r["similarity"] = 0.0  # relational-only, no vector score
+            merged[chunk_id] = r
+
+    # Sort: boosted first, then by similarity descending
+    final = sorted(
+        merged.values(),
+        key=lambda x: (x.get("boosted", False), x.get("similarity") or 0),
+        reverse=True,
+    )
+    final = final[:request.match_count]
+
+    return {
+        "query": request.query,
+        "results": final,
+        "count": len(final),
+        "search_type": "hybrid",
+        "vector_count": len(vector_results),
+        "relational_count": len(relational_results),
+    }
+
+
 @app.get("/api/question")
 async def get_question(resource_id: Optional[str] = None):
     # This simulates fetching a question and its examiner report hint from OpenKB

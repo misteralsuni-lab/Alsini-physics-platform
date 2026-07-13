@@ -126,11 +126,43 @@ if __name__ == "__main__":
         
         # 3. Database Injection (Semantic JSON)
         push_to_supabase(TARGET_ID, kb_json)
-            
+        
     except Exception as e:
         print(f"Pipeline Error: {e}")
         if "poppler" in str(e).lower():
             print("\nWINDOWS FIX: You need to install Poppler for Windows to convert PDFs to images.")
+
+    # 3b. Chunk Embedding Pipeline (Hybrid Retrieval Foundation)
+    #     Chunk the semantic JSON content and embed via NVIDIA NV-EmbedQA-E5-V5
+    #     for pgvector cosine similarity search.
+    print("\n" + "=" * 60)
+    print("  CHUNK EMBEDDING (pgvector)")
+    print("=" * 60)
+
+    try:
+        _backend_dir = Path(__file__).resolve().parent
+        sys.path.insert(0, str(_backend_dir))
+        sys.path.insert(0, str(_backend_dir / "pipeline"))
+
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise RuntimeError("Supabase credentials missing — cannot run embedding pipeline.")
+
+        from pipeline.embedding_pipeline import embed_resource
+
+        nvidia_key = os.getenv("NVIDIA_API_KEY")
+        if not nvidia_key:
+            print("  NVIDIA_API_KEY missing — skipping embedding (non-fatal)")
+        else:
+            result = embed_resource(TARGET_ID, SUPABASE_URL, SUPABASE_KEY, nvidia_key)
+            print(f"  Chunked: {result['chunked']} | Embedded: {result['embedded']} | "
+                  f"Stored: {result['stored']}")
+            if result['stored'] != result['embedded']:
+                print("  WARNING: Not all chunks were stored — check Supabase logs.")
+
+    except Exception as embed_err:
+        print(f"  Embedding Pipeline Error (non-fatal): {embed_err}")
+        print("  Semantic pipeline completed successfully. "
+              "Embeddings can be re-generated manually via embedding_pipeline.py.")
 
     # 4. Visual Asset Pipeline (Milestone 2 integration)
     #    Extract visual assets from the same PDF, upload to Storage,
