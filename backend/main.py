@@ -49,6 +49,18 @@ class TutorRequest(BaseModel):
     student_prompt: str
     history: Optional[List[Message]] = []
 
+class TutorSource(BaseModel):
+    chunk_id: str
+    concept: Optional[str] = None
+    page: Optional[int] = None
+    chunk_type: str
+    similarity: Optional[float] = None
+
+class TutorResponse(BaseModel):
+    response: str
+    model_used: str
+    sources: List[TutorSource] = []
+
 class GradeRequest(BaseModel):
     student_id: str
     resource_id: str
@@ -64,11 +76,97 @@ class GradeResponse(BaseModel):
 
 # Constants
 TARGET_RESOURCE_ID = "5729d034-a6c7-4f35-b81c-fcac447289c7" # Forces and Motion Resource
+TUTOR_CHUNK_COUNT = 5  # top-N chunks to inject as RAG context
 
-# Helper: Fetch Resource from Supabase
+# -------------------------------------------------------------------
+# RAG Retrieval Helpers (reuse existing _embed_query and _supabase_headers)
+# -------------------------------------------------------------------
+
+def _retrieve_relevant_chunks(query: str, match_count: int = TUTOR_CHUNK_COUNT) -> list[dict]:
+    """
+    Embed the student's question, call match_resource_chunks RPC scoped to
+    the Golden Dataset resource, and return ranked chunks for RAG context.
+    Returns empty list on any failure (non-fatal — tutor still works).
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("[RAG] Supabase credentials not configured — skipping retrieval.")
+        return []
+    if not nvidia_client:
+        print("[RAG] NVIDIA API not configured — skipping embedding.")
+        return []
+
+    try:
+        query_vec = _embed_query(query)
+        vec_str = _vector_to_pg_str(query_vec)
+
+        headers = _supabase_headers()
+        rpc_body = {
+            "query_embedding": vec_str,
+            "match_count": min(match_count, 10),
+            "filter_resource_id": TARGET_RESOURCE_ID,
+        }
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
+            headers=headers,
+            json=rpc_body,
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            print(f"[RAG] RPC failed ({resp.status_code}): {resp.text[:120]}")
+            return []
+        return resp.json()
+    except Exception as e:
+        print(f"[RAG] Retrieval error (non-fatal): {e}")
+        return []
+
+
+def _format_chunks_as_context(chunks: list[dict]) -> str:
+    """Build a compact, citation-rich context block from retrieved chunks."""
+    if not chunks:
+        return ""
+    lines = ["Retrieved educational context (from the Forces and Motion resource):"]
+    for i, c in enumerate(chunks):
+        idx = i + 1
+        ctype = c.get("chunk_type", "concept")
+        text = c.get("chunk_text", "")
+        sources = c.get("source_refs", {}) or {}
+        concept = sources.get("concept", "")
+        page = sources.get("page")
+        sim = c.get("similarity")
+
+        # Build a tight citation suffix
+        cite_parts = []
+        if concept:
+            cite_parts.append(f"concept: {concept}")
+        if page is not None:
+            cite_parts.append(f"page {page}")
+        cite_str = f" [{', '.join(cite_parts)}]" if cite_parts else ""
+
+        lines.append(f"  [{idx}] ({ctype}){cite_str}  {text}")
+    return "\n".join(lines)
+
+
+def _chunks_to_sources(chunks: list[dict]) -> list[TutorSource]:
+    """Extract source metadata from retrieved chunks for the response."""
+    return [
+        TutorSource(
+            chunk_id=c.get("id", ""),
+            concept=(c.get("source_refs") or {}).get("concept"),
+            page=(c.get("source_refs") or {}).get("page"),
+            chunk_type=c.get("chunk_type", "concept"),
+            similarity=c.get("similarity"),
+        )
+        for c in chunks
+    ]
+
+
+# ===== retained for /api/grade compatibility (still dumps full JSON) =====
 def fetch_forces_and_motion_data():
     """
-    Fetches the JSON OpenKB structure for the "Forces and Motion" resource directly from Supabase.
+    Fetches the JSON OpenKB structure for the "Forces and Motion" resource
+    directly from Supabase.  NOTE: /api/tutor no longer calls this — it uses
+    RAG retrieval instead.  This helper is retained for /api/grade which
+    still requires full-spec grading context.
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
         print("Warning: Supabase credentials not found.")
@@ -115,40 +213,56 @@ def evaluate_routing(prompt: str) -> str:
     print("Semantic Router: Routing to GEMINI (Flash 2.5)")
     return "GEMINI"
 
-@app.post("/api/tutor")
+@app.post("/api/tutor", response_model=TutorResponse)
 async def tutor_endpoint(request: TutorRequest):
     if not request.student_prompt:
         raise HTTPException(status_code=400, detail="student_prompt is required.")
-        
+
+    # --- RAG Retrieval ---
+    # Replace the old full-JSON dump with targeted hybrid retrieval.
+    # Embed the student's question, search resource_chunks scoped to the
+    # Golden Dataset resource, and inject only the top-N relevant chunks.
+    retrieved_chunks = _retrieve_relevant_chunks(request.student_prompt)
+    rag_context = _format_chunks_as_context(retrieved_chunks)
+    sources = _chunks_to_sources(retrieved_chunks)
+
+    print(f"[RAG] Retrieved {len(retrieved_chunks)} chunks for tutor context.")
+
     route_target = evaluate_routing(request.student_prompt)
-    
-    # Fetch Context Data (Vertical Slice: Forces and Motion)
-    context_data = fetch_forces_and_motion_data()
+
+    # Build system prompt — tutor persona + RAG context (NOT the full JSON)
     system_prompt = (
         "You are an expert, encouraging Edexcel IGCSE and A-Level Physics Tutor.\n"
         "You are an Edexcel IGCSE Physics Examiner. Never ask hybrid coordinate-graphing questions. Questions must be EITHER a pure mathematical calculation OR a conceptual explanation. Do not deviate from official past-paper formats.\n"
         "You guide students using Socratic questioning and never give the final answer immediately.\n"
         "Format mathematical explanations cleanly.\n"
-        "The UI has 4 tabs: Lesson, Worksheet, Simulation, and Quiz. If a student asks to view a resource, take a quiz, or use a simulation, you must append a navigation tag to the end of your response in the exact format: [SWITCH_TAB: TabName] (e.g., [SWITCH_TAB: Quiz])."
+        "The UI has 4 tabs: Lesson, Worksheet, Simulation, and Quiz. If a student asks to view a resource, take a quiz, or use a simulation, you must append a navigation tag to the end of your response in the exact format: [SWITCH_TAB: TabName] (e.g., [SWITCH_TAB: Quiz]).\n"
     )
-    
-    if context_data:
-        system_prompt += f"\n\nContext (Forces and Motion Knowledge Graph):\n{context_data}\n"
-    
+
+    if rag_context:
+        system_prompt += (
+            "\n"
+            "When citing a fact from the retrieved context below, reference the source number "
+            "in brackets (e.g. [Source 1]).  Do NOT invent or guess page numbers — only use "
+            "information explicitly present in the retrieved context.\n"
+            "\n"
+            + rag_context + "\n"
+        )
+
     if route_target == "NVIDIA":
         # Route to Nvidia Llama 3.3 for complex/grading tasks
         if not nvidia_client:
             raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
-            
+
         messages = [{"role": "system", "content": system_prompt}]
-        
+
         # Add history
         for msg in request.history:
             messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.content})
-            
+
         # Add current message
         messages.append({"role": "user", "content": request.student_prompt})
-        
+
         try:
             response = nvidia_client.chat.completions.create(
                 model="meta/llama-3.3-70b-instruct",
@@ -157,15 +271,15 @@ async def tutor_endpoint(request: TutorRequest):
                 max_tokens=2048,
             )
             reply = response.choices[0].message.content
-            return {"response": reply, "model_used": "NVIDIA_LLAMA_3.3"}
+            return TutorResponse(response=reply, model_used="NVIDIA_LLAMA_3.3", sources=sources)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Nvidia API Error: {str(e)}")
-            
+
     else:
         # Route to Gemini Flash for simple/conversational tasks
         if not GEMINI_API_KEY:
             raise HTTPException(status_code=500, detail="GEMINI API is not configured.")
-            
+
         try:
             # Format history for Gemini API
             gemini_history = []
@@ -173,18 +287,19 @@ async def tutor_endpoint(request: TutorRequest):
                 # Map role correctly ('user' or 'model')
                 role = "user" if msg.role == "user" else "model"
                 gemini_history.append({"role": role, "parts": [{"text": msg.content}]})
-                
+
             # Initialize model with system instruction
             local_model = genai.GenerativeModel(
                 'gemini-2.5-flash',
                 system_instruction=system_prompt
             )
-            
+
             chat = local_model.start_chat(history=gemini_history)
             result = chat.send_message(request.student_prompt)
-            
-            return {"response": result.text, "model_used": "GEMINI_FLASH"}
-            
+            reply_text = result.text or ""
+
+            return TutorResponse(response=reply_text, model_used="GEMINI_FLASH", sources=sources)
+
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
 

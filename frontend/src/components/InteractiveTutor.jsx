@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
-import { Send, FileText, Bot, User, X, ChevronLeft, Loader2 } from 'lucide-react';
+import { Bot, Send, Square, Network, FileText, X, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import HybridDocumentViewer from './HybridDocumentViewer';
+import SearchPanel from './SearchPanel';
 import QuizEngine from './QuizEngine';
+import { supabase } from '../lib/supabaseClient';
 
 const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   const { chapterId } = useParams();
@@ -16,6 +17,13 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTutorOpen, setIsTutorOpen] = useState(false);
+
+  // Synchronization focus state (Stage 4: bidirectional sync)
+  // When the student clicks a concept/asset/spec-point in HybridDocumentViewer,
+  // it propagates here as `focus`. The AI tutor input shows a context chip
+  // and prefixes the next question with this focus so the tutor grounds its
+  // answer in the selected learning object.
+  const [focus, setFocus] = useState(null);
   
   // Data Fetching States
   const [specPoints, setSpecPoints] = useState([]);
@@ -120,18 +128,28 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
       }));
 
     try {
-      // 3. Make real fetch call to the backend
-      const response = await fetch('http://localhost:5000/api/chat', {
+      // 3. Call FastAPI /api/tutor with RAG-retrieved context
+      //    (replaces old Express :5000/api/chat which had no retrieval).
+      //    If a concept/asset was focused in the viewer, prefix the question
+      //    with that context so the tutor grounds its answer in it.
+      let contextualPrompt = userMessageText;
+      if (focus) {
+        let ctx = '';
+        if (focus.concept) ctx = `The student is looking at the concept "${focus.concept}". `;
+        else if (focus.asset_type) ctx = `The student is viewing a ${focus.asset_type} on page ${focus.page || '?'}. `;
+        else if (focus.spec_point) ctx = `The student is on specification point "${focus.spec_point}". `;
+        contextualPrompt = ctx + userMessageText;
+        setFocus(null); // consume the context chip
+      }
+
+      const response = await fetch('http://localhost:8000/api/tutor', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          history: formattedHistory.map(msg => ({
-            role: msg.role,
-            parts: [{ text: msg.content }]
-          })),
-          message: userMessageText
+          student_prompt: contextualPrompt,
+          history: formattedHistory
         })
       });
 
@@ -143,9 +161,11 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
 
       let aiText = data.response || '';
       const modelUsed = data.model_used || 'Unknown Model';
-      
+      const sources = data.sources || [];
+
       console.log(`[Semantic Router] Routed to: ${modelUsed}`);
-      
+      console.log(`[RAG] Sources: ${sources.length} chunks retrieved`);
+
       // Intercept navigation tag
       const tabTracker = /\[SWITCH_TAB:\s*(.*?)\]/i;
       const match = aiText.match(tabTracker);
@@ -161,10 +181,10 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
          }
       }
 
-      // Append successfully received message
+      // Append successfully received message (with sources)
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, role: 'ai', text: aiText, modelUsed: modelUsed }
+        { id: Date.now() + 1, role: 'ai', text: aiText, modelUsed: modelUsed, sources: sources }
       ]);
       
     } catch (error) {
@@ -234,7 +254,11 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
               {activeTab === 'Worksheet' ? (
                 // --- HYBRID DOCUMENT VIEWER INTEGRATION ---
                 <div className="w-full h-full">
-                  <HybridDocumentViewer resourceId={worksheetResource?.id} />
+                  <HybridDocumentViewer
+                    resourceId={worksheetResource?.id}
+                    focus={focus}
+                    onFocus={setFocus}
+                  />
                 </div>
               ) : activeTab === 'Quiz' ? (
                 <div className="w-full h-full">
@@ -317,6 +341,23 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
                              {msg.text}
                            </ReactMarkdown>
                          </div>
+                         {/* RAG Source Citations */}
+                         {msg.sources && msg.sources.length > 0 && (
+                           <div className="mt-3 pt-2 border-t border-white/5 flex flex-wrap gap-1.5">
+                             {msg.sources.map((src, i) => (
+                               <span
+                                 key={src.chunk_id || i}
+                                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#151515] border border-white/10 text-[10px] text-gray-500 font-mono"
+                                 title={`${src.chunk_type} · similarity: ${(src.similarity || 0).toFixed(2)}`}
+                               >
+                                 <span className="text-emerald-500/60">[{i + 1}]</span>
+                                 {src.concept && <span className="text-gray-400">{src.concept}</span>}
+                                 {src.page != null && <span className="text-gray-600">p.{src.page}</span>}
+                                 <span className="text-[9px] text-gray-600 uppercase">{src.chunk_type}</span>
+                               </span>
+                             ))}
+                           </div>
+                         )}
                          {msg.modelUsed && (
                            <div className="absolute -bottom-3 right-2 bg-[#1a1a1a] border border-white/10 px-2 py-0.5 rounded-full text-[9px] text-gray-500 font-mono flex items-center gap-1 shadow-sm opacity-80 hover:opacity-100 transition-opacity cursor-default">
                               <Bot className="w-2.5 h-2.5" /> {msg.modelUsed.replace('_', ' ')}
@@ -347,6 +388,24 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
 
            {/* Chat Input Area */}
            <div className="p-4 bg-[#050505]/80 backdrop-blur-md border-t border-white/5 z-10">
+              {/* Sync context chip — shows what the student focused on in the viewer */}
+              {focus && (
+                <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs">
+                  <span className="text-emerald-400/70 font-mono uppercase tracking-wider text-[10px]">Context</span>
+                  <span className="text-gray-300">
+                    {focus.concept && `Concept: ${focus.concept}`}
+                    {focus.asset_type && `Asset: ${focus.asset_type}${focus.page ? ` (p.${focus.page})` : ''}`}
+                    {focus.spec_point && `Spec: ${focus.spec_point}`}
+                  </span>
+                  <button
+                    onClick={() => setFocus(null)}
+                    className="ml-auto text-gray-500 hover:text-gray-300 transition-colors text-[10px]"
+                    aria-label="Clear context"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               <form onSubmit={handleSend} className="relative flex items-center">
                  <input
                    type="text"

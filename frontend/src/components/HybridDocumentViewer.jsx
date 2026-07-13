@@ -23,9 +23,16 @@ const itemVariants = {
 };
 
 // --- Visual Asset Card ---
-const AssetCard = ({ asset, onZoom }) => {
+const AssetCard = ({ asset, onZoom, onFocus }) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const handleRetry = () => {
+    setHasError(false);
+    setIsLoaded(false);
+    setRetryCount((c) => c + 1);
+  };
 
   return (
     <motion.div
@@ -33,19 +40,29 @@ const AssetCard = ({ asset, onZoom }) => {
       className="group relative rounded-2xl border border-white/10 bg-[#0A0A0A]/60 overflow-hidden"
     >
       {/* Asset image */}
-      <div className="relative flex items-center justify-center bg-white/95 min-h-[200px]">
+      <div
+        className="relative flex items-center justify-center bg-white/95 min-h-[200px] cursor-pointer"
+        onClick={() => onFocus && onFocus({ type: 'asset', asset_id: asset.id, asset_type: asset.asset_type, page: asset.page_number })}
+      >
         {!isLoaded && !hasError && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80">
             <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
           </div>
         )}
         {hasError ? (
-          <div className="flex flex-col items-center gap-2 p-8 text-gray-500">
+          <div className="flex flex-col items-center gap-3 p-8 text-gray-500">
             <AlertCircle className="w-6 h-6 text-red-500/60" />
             <span className="text-xs">Failed to load asset</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleRetry(); }}
+              className="text-[10px] px-3 py-1 rounded-full bg-white/5 border border-white/10 text-gray-400 hover:border-emerald-500/30 hover:text-emerald-400 transition-colors"
+            >
+              Retry
+            </button>
           </div>
         ) : (
           <img
+            key={retryCount}
             src={asset.storage_url}
             alt={asset.caption || `${asset.asset_type} on page ${asset.page_number}`}
             className={`max-w-full h-auto transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
@@ -200,7 +217,7 @@ const ConceptPopup = ({ block, onClose, onSelectRelated }) => (
   </motion.div>
 );
 
-const HybridDocumentViewer = ({ resourceId }) => {
+const HybridDocumentViewer = ({ resourceId, focus, onFocus }) => {
   const [viewMode, setViewMode] = useState('document'); // 'document' | 'interactive'
   const [data, setData] = useState(null);
   const [assets, setAssets] = useState([]);
@@ -208,6 +225,16 @@ const HybridDocumentViewer = ({ resourceId }) => {
   const [error, setError] = useState(null);
   const [selectedIdx, setSelectedIdx] = useState(null);
   const [zoomAsset, setZoomAsset] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState(null);
+
+  // Derive the original PDF public URL from the resource ID + Supabase project URL.
+  // The bucket 'resource-assets' is public; the PDF was uploaded during Session 3
+  // at {resource_id}/original.pdf.
+  useEffect(() => {
+    if (!resourceId) return;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://miezybwngeqdyqvvqcrl.supabase.co';
+    setPdfUrl(`${supabaseUrl}/storage/v1/object/public/resource-assets/${resourceId}/original.pdf`);
+  }, [resourceId]);
 
   const blocks = React.useMemo(() => {
     const c = data?.content;
@@ -356,18 +383,42 @@ const HybridDocumentViewer = ({ resourceId }) => {
                 initial="hidden"
                 animate="visible"
                 exit="exit"
-                className="max-w-4xl mx-auto"
+                className="max-w-5xl mx-auto"
               >
-                {/* Visual Assets Section */}
+                {/* Mode A: Original PDF (authoritative visual source) */}
+                {pdfUrl && (
+                  <motion.div variants={itemVariants} className="mb-8">
+                    <div className="flex items-center gap-2 mb-4">
+                      <FileText className="w-5 h-5 text-emerald-400" />
+                      <h3 className="text-lg font-drama text-emerald-400">Original Worksheet</h3>
+                      <span className="text-xs text-gray-500 ml-2">authentic PDF</span>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 overflow-hidden bg-white shadow-[0_4px_30px_rgba(0,0,0,0.6)]">
+                      <iframe
+                        src={pdfUrl}
+                        className="w-full h-[70vh] min-h-[500px] max-h-[900px]"
+                        title="Original worksheet PDF"
+                        sandbox="allow-scripts allow-same-origin"
+                      />
+                    </div>
+                    {!data?.content_markdown && !data?.content && (
+                      <p className="text-xs text-gray-600 mt-2 text-center">
+                        Switch to Interactive Knowledge view to explore concepts, formulas, and assets extracted from this document.
+                      </p>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* Visual Assets Section (rendered below the PDF, URL-driven from Supabase Storage) */}
                 {assets.length > 0 && (
                   <motion.div variants={itemVariants} className="mb-8">
                     <div className="flex items-center gap-2 mb-4">
                       <ImageIcon className="w-5 h-5 text-emerald-400" />
                       <h3 className="text-lg font-drama text-emerald-400">
-                        Visual Assets
+                        Extracted Assets
                       </h3>
                       <span className="text-xs text-gray-500 ml-2">
-                        {assets.length} extracted from source PDF
+                        {assets.length} figures from source PDF
                       </span>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -376,34 +427,33 @@ const HybridDocumentViewer = ({ resourceId }) => {
                           key={asset.id}
                           asset={asset}
                           onZoom={setZoomAsset}
+                          onFocus={onFocus}
                         />
                       ))}
                     </div>
                   </motion.div>
                 )}
 
-                {/* Markdown content */}
-                <div className="prose prose-invert prose-emerald max-w-none">
-                  {data?.content_markdown ? (
+                {/* Markdown content (secondary, as a text-rendered interpretation) */}
+                {data?.content_markdown && (
+                  <div className="prose prose-invert prose-emerald max-w-none mt-6 p-6 rounded-2xl bg-[#0A0A0A]/50 border border-white/5">
+                    <div className="text-xs text-gray-500 uppercase tracking-widest mb-4">Text Interpretation</div>
                     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                       {data.content_markdown}
                     </ReactMarkdown>
-                  ) : (
-                    <div className="p-8 border border-dashed border-white/10 rounded-2xl text-center bg-[#0A0A0A]/50">
-                      <FileText className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                      <h3 className="text-gray-300 text-lg mb-2">
-                        {assets.length > 0
-                          ? "Markdown content not yet generated"
-                          : "No content available"}
-                      </h3>
-                      <p className="text-gray-500 text-sm">
-                        {assets.length > 0
-                          ? "Switch to Interactive view to explore the knowledge graph, or view the visual assets above."
-                          : "Switch to the Interactive view to explore the raw JSON data."}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
+
+                {/* Gentle fallback if no PDF and no content */}
+                {!pdfUrl && !data?.content_markdown && assets.length === 0 && (
+                  <div className="p-8 border border-dashed border-white/10 rounded-2xl text-center bg-[#0A0A0A]/50">
+                    <FileText className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                    <h3 className="text-gray-300 text-lg mb-2">No content available</h3>
+                    <p className="text-gray-500 text-sm">
+                      Switch to the Interactive Knowledge view to explore what has been extracted.
+                    </p>
+                  </div>
+                )}
               </motion.div>
             ) : (
               <motion.div
@@ -468,12 +518,21 @@ const HybridDocumentViewer = ({ resourceId }) => {
 
                 {blocks.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {blocks.map((b, i) => (
+                    {blocks.map((b, i) => {
+                      const isFocused = focus && focus.concept === b.concept;
+                      return (
                       <motion.button
                         key={i}
                         variants={itemVariants}
-                        onClick={() => setSelectedIdx(i)}
-                        className="text-left p-5 rounded-2xl border border-white/10 bg-[#0A0A0A]/60 backdrop-blur-md shadow-lg hover:bg-white/5 hover:border-emerald-500/40 transition-all group"
+                        onClick={() => {
+                          setSelectedIdx(i);
+                          if (onFocus) onFocus({ concept: b.concept, block_index: i, type: 'concept' });
+                        }}
+                        className={`text-left p-5 rounded-2xl border backdrop-blur-md shadow-lg hover:bg-white/5 transition-all group ${
+                          isFocused
+                            ? 'border-emerald-500/60 bg-emerald-500/5 ring-1 ring-emerald-500/30'
+                            : 'border-white/10 bg-[#0A0A0A]/60 hover:border-emerald-500/40'
+                        }`}
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-emerald-400 font-mono text-sm font-medium tracking-wider uppercase">
@@ -488,14 +547,19 @@ const HybridDocumentViewer = ({ resourceId }) => {
                           {(b.related_concepts || []).map((rc) => (
                             <span
                               key={rc}
-                              className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-400"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onFocus) onFocus({ concept: rc, type: 'concept' });
+                              }}
+                              className="cursor-pointer text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-400 hover:border-emerald-500/30 hover:text-emerald-400 transition-colors"
                             >
                               {rc}
                             </span>
                           ))}
                         </div>
                       </motion.button>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-gray-500 italic p-4 bg-white/5 rounded-xl border border-white/5">
