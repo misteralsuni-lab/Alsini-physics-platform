@@ -10,10 +10,15 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 ## 2. Technology Stack
 - **Frontend Framework**: React (via Vite)
 - **Styling**: Tailwind CSS
-- **Animations**: GSAP
+- **Animations**: GSAP, Framer Motion
 - **Icons**: Lucide React
-- **Backend & Auth**: Supabase (Database, Authentication, Row Level Security)
-- **Environment**: Node.js ecosystem
+- **Backend & Auth**: Supabase (Database, Authentication, Row Level Security, Storage)
+- **Backend API**: Dual stack — legacy Node.js Express (`backend/server.js`) and the primary FastAPI service (`backend/main.py`, Uvicorn, port 8000) that now powers chat, search, and grading
+- **Embeddings / Vector Search**: pgvector on Supabase, NVIDIA `nv-embedqa-e5-v5` (1024-dim) via the NVIDIA API, HNSW cosine index
+- **AI Models**: Google Gemini 2.5 Flash (Socratic tutor), Gemini/NVIDIA Nemotron for grading, NVIDIA NIM vision models for PDF ingestion
+- **Ingestion**: Python pipeline using PyMuPDF (`fitz`), `pdf2image`, PyPDF2, Pillow, requests, `openai` SDK (NVIDIA base URL)
+- **Testing**: Playwright (frontend QA), standalone Node/Python verification scripts
+- **Environment**: Node.js + Python (venv) ecosystem
 
 ## 3. Features Implemented
 
@@ -102,6 +107,37 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Local & Remote MCP Architecture**: Configured a dual MCP (Model Context Protocol) setup. A custom Python-based local MCP server handles specialized database queries (like `resources` search), while the official Supabase Remote MCP (SSE) provides broad administrative capabilities. Documented the entire configuration across major IDEs (Cursor, VS Code, Claude Desktop) in `mcp_configuration_for_supabase.md`.
 - **Git Security & Ignore Rules**: Audited and tightened `.gitignore` rules to prevent accidental commits of sensitive environment variables, IDE settings (`.understand-anything`), python environments (`python_interpreter/`, `__pycache__/`), and large scratch binaries. Set up local Git user configuration to standardize project commits.
 
+### 3.15. Visual Asset Infrastructure (Milestone 1 — Session 2 Complete)
+- **`resource_assets` Table**: Added a normalized 15-column table with UUID PK, FK to `resources(id)` (`ON DELETE CASCADE`), JSONB `bounding_box`/`metadata`, 4 B-Tree indexes, and RLS (public read, authenticated write). Migration: `migrations/mig_5_resource_assets.sql`.
+- **Supabase Storage Bucket**: Created a public `resource-assets` bucket (10 MB limit) hosting uploaded PNG assets with permanent CDN URLs — no auth required for GET.
+- **Extraction Pipeline**: Built a `backend/pipeline/` package (`asset_extractor.py`, `storage_uploader.py`, `run_asset_pipeline.py`) that uses PyMuPDF to extract embedded raster images, classify them (graph, plotting_grid, figure, etc.), verify content, and upload to Storage. Validated against the Golden Dataset (IGCSE Movement & Position worksheet — graph + plotting grid extracted, uploaded, verified).
+- **Asset API Endpoints** (FastAPI): `GET /api/resources/{resource_id}/assets` and `GET /api/resources/{resource_id}/assets/{asset_type}` expose stored visual assets to the frontend.
+- **Linked Question Resolver**: The resource detail / asset flow can resolve which question an asset belongs to via the semantic JSON relationship map.
+- **`content_markdown` Column**: Added nullable `content_markdown` to `resources` for future flat-markdown rendering.
+
+### 3.16. Hybrid Retrieval Foundation (Milestone 2 — Session 3 Complete)
+- **`resource_chunks` Table**: Added a table with a `vector(1024)` embedding column, FK to `resources`, HNSW index (`vector_cosine_ops`, `m=16`, `ef_construction=200`), and RLS. Migration: `migrations/mig_6_resource_chunks.sql`.
+- **`match_resource_chunks` RPC**: Postgres function performing cosine-similarity search with optional `filter_resource_id`, returning ranked chunks plus `similarity` scores. Migration: `migrations/mig_7_match_function.sql`.
+- **Embedding Pipeline**: `backend/pipeline/embedding_pipeline.py` chunks OpenKB semantic JSON by node type (concept/formula/definition/relation), embeds via NVIDIA `nv-embedqa-e5-v5`, and stores in `resource_chunks` (idempotent — deletes before re-embedding).
+- **Search Endpoints** (FastAPI): `POST /api/search` (pure semantic vector search) and `POST /api/search/hybrid` (combined relational + vector search with filter, merge, dedup, and +0.1 relevance boost for cross-matches).
+- **Ingestion Integration**: `master_ingestion.py` now auto-runs the embedding pipeline after the semantic JSON push (non-fatal if NVIDIA API is unavailable).
+- **Verified**: Golden Dataset (21 chunks embedded); "How does velocity relate to displacement?" correctly returned velocity/displacement chunks (similarity 0.34–0.50).
+
+### 3.17. Agentic Search Panel & Document Viewer Integration
+- **`SearchPanel.jsx`**: New frontend component exposing hybrid retrieval to the learner. Calls `POST /api/search/hybrid`, surfaces similarity scores, source resource, page number, and chunk type, with chunk-type filters (All / Concepts / Formulas / Relations / Questions). Clicking a result navigates the viewer to the relevant content.
+- **Concept Pop-up**: `HybridDocumentViewer.jsx` gained an interactive `ConceptPopup` that opens a concept's equation, definition, and related concepts on click, with cross-linking between related concept nodes.
+- **Rich Content Prioritization**: The Interactive Tutor now prioritizes rich content resources and the document viewer was hardened for concept rendering.
+
+### 3.18. RAG-Enhanced AI Tutor & Backend Unification
+- **FastAPI Supplants Express for AI**: The AI Tutor frontend now calls the FastAPI `POST /api/tutor` endpoint (port 8000) instead of the legacy Express `/api/chat`. The Express `server.js` remains for backward compatibility but is no longer the primary chat path.
+- **True RAG**: `/api/tutor` embeds the student's question, retrieves the top-N (5) relevant `resource_chunks` via `_retrieve_relevant_chunks`, and injects only those chunks as context — replacing the old behaviour of dumping the entire OpenKB JSON into the system prompt. Retrieval is non-fatal (tutor still answers if retrieval fails).
+- **Graded Responses & Sources**: The tutor response model returns cited `sources` (chunk id, concept, page, chunk type, similarity).
+- **Question & Grading Endpoints**: `GET /api/question` (resolved from the resource) and `POST /api/grade` (Gemini acting as a strict Edexcel IGCSE examiner, returning marks + explanation) power the `QuizEngine.jsx`.
+- **Routing**: A lightweight `evaluate_routing` classifier detects grading/calculation intents to tailor tutor behaviour.
+
+### 3.19. Quiz Engine
+- **`QuizEngine.jsx`**: New interactive quiz component that fetches a question for the active resource (`/api/question`) and submits student answers to the Gemini-backed `/api/grade` endpoint, rendering marks awarded and examiner feedback.
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
@@ -111,5 +147,10 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Backend Connection Errors**: Debugged network 'Connection error' between frontend and backend by implementing permissive CORS settings for local development, adding X-Ray logging, and improving error handling in `backend/server.js`.
 
 ## 5. Next Steps
-- **Interactive Resources**: Continue developing the dynamic PDF embed components and the toggle button to seamlessly switch between Question Papers and Mark Schemes for each `specification_point`.
-- **Content Expansion**: Expand the automated ingestion pipeline to cover additional chapters and integrate interactive physics simulations into the Virtual Learning Environment.
+- **Frontend Asset Rendering**: Wire `resource_assets` into `HybridDocumentViewer`/`SearchPanel` so extracted graphs and plotting grids render inline (the `<img>` rendering gap noted in the forensic investigation).
+- **Tutor ↔ Search Unification**: Have the AI Tutor call `/api/search` (RAG) per question rather than the scoped `match_resource_chunks` retrieval, and generalize beyond the single Golden Dataset resource (`TARGET_RESOURCE_ID`).
+- **Backend Consolidation**: Unify Express (`server.js`) and FastAPI (`main.py`) behind one port / reverse proxy so the frontend only targets a single API origin.
+- **Re-embedding Hook**: Add a trigger to re-run `embedding_pipeline.py` when a `resources.content` row is updated outside `master_ingestion.py`.
+- **Interactive Resources**: Develop the dynamic PDF embed components and a toggle to switch between Question Papers and Mark Schemes per `specification_point`.
+- **Content Expansion**: Extend the ingestion pipeline across additional chapters and integrate interactive physics simulations into the VLE.
+- **Linked Question Population**: Backfill `resource_assets.linked_question_id` by cross-referencing the semantic JSON relationship map.
