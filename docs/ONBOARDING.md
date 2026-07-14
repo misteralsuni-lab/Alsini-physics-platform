@@ -1,205 +1,118 @@
-# Onboarding Guide: Alsini Physics Platform (EDU-VLE)
+# Alsini Physics Platform — Developer Onboarding Guide
 
-## Project Overview
+> Generated from the project knowledge graph (commit `0b1b650`, analyzed 2026-05-27).
 
-| Field | Value |
-|---|---|
-| **Name** | `alsini-physics-platform` |
-| **Description** | Physics education platform with React frontend (Vite + TailwindCSS), dual backend (Express.js + FastAPI), Supabase auth/storage, and Google Generative AI for interactive tutoring and quiz grading. |
-| **Languages** | CSS, HTML, JavaScript, JSON, Markdown, Python, Shell, SQL, YAML |
-| **Frameworks** | Express, FastAPI, Framer Motion, Google Generative AI, Playwright, Pydantic, React, Supabase, TailwindCSS, Uvicorn, Vite |
-| **Files Analyzed** | 291 |
-| **Repository Commit** | `0b1b65096aefb7fd831023f3fe3cc812f769063a` |
+## 1. Project Overview
 
----
+**Alsini Physics Platform** is a physics education Virtual Learning Environment (VLE) for the Edexcel IGCSE/A-Level curriculum.
 
-## Architecture Layers (8 layers)
+- **Languages:** JavaScript, Python, SQL, HTML, CSS, YAML, JSON, Shell, Markdown
+- **Frameworks:** React (Vite + TailwindCSS), Express.js, FastAPI, Supabase, Google Generative AI, Framer Motion, Pydantic, Uvicorn, Playwright
+- **Architecture:** A React SPA frontend talks to a **dual backend** — Express.js handles real-time Gemini chat, while FastAPI powers the AI tutor conversation engine and quiz grading (Examiner API). Supabase provides auth + PostgreSQL storage. Content is seeded from Pearson's Edexcel specification via PDF/OCR pipelines.
 
-### 1. Frontend UI Layer
-React SPA components, page layouts, stylesheets, and the application shell (App.jsx, main.jsx) forming the VLE's client-side interface with Supabase auth and AI tutor integration.
+> **Start here:** `gemini.md` — a 13-phase project summary and the roadmap for everything below.
 
-**Key files:** `Auth.jsx`, `InteractiveTutor.jsx`, `HybridDocumentViewer.jsx`, `QuizEngine.jsx`, `Sidebar.jsx`, `VLEDashboard.jsx`, `Hero.jsx`, `Features.jsx`, `App.jsx`, `main.jsx`, `supabaseClient.js`
+## 2. Architecture Layers
 
-### 2. Backend Services Layer
-Express.js chat server with Gemini AI integration and FastAPI Python services for AI tutoring, quiz grading, and physics content processing.
+| Layer | Purpose |
+|-------|---------|
+| **Frontend UI** | React SPA: components, landing pages, Supabase auth, AI tutor UI |
+| **Backend Services** | Express.js chat server + FastAPI Python tutor/grading services |
+| **Data** | PostgreSQL schemas, migrations, Edexcel curriculum seed data (Supabase) |
+| **Scripts & Tooling** | Data ingestion pipeline, Supabase MCP server, SoW parsers, RLS tests |
+| **Configuration** | package.json manifests, Vite/Tailwind/ESLint/PostCSS, VS Code settings |
+| **Testing** | Playwright E2E specs for VLE Dashboard worksheet tab |
+| **Documentation** | gemini.md, MCP config guide, frontend README, engineering role docs |
+| **Agency AI Agents** | Third-party collection of 200+ AI agent personalities (separate subtree) |
 
-**Key files:** `backend/server.js`, `backend/main.py`, `backend/requirements.txt`
+## 3. Key Concepts
 
-### 3. Data Layer
-PostgreSQL database schemas, SQL migration scripts, Edexcel IGCSE physics curriculum seed data, quiz attempts table.
+- **Dual backend split:** Express.js (live Gemini chat) vs FastAPI (tutor engine + quiz grading via Examiner API).
+- **Supabase as the spine:** Auth, PostgreSQL, and Row-Level Security (RLS) — the `supabaseClient.js` singleton (fan-in: 8) is imported by nearly every component.
+- **Protected routing:** `App.jsx` centralizes auth state and guards VLE routes.
+- **RLS-first data access:** Curriculum and `quiz_attempts` tables filter rows per `auth.uid()` at the DB level — never bypass on the client.
+- **Curriculum hierarchy:** `units → chapters → specification_points → activities/resources → questions` mirrors the IGCSE syllabus; UUID PKs (not auto-increment) for enumeration safety.
+- **MCP-driven DB ops:** `supabase_mcp.py` exposes Supabase as tools for agentic management.
+- **Content lifecycle:** Pearson PDF → MinerU OCR (`MinerU_SOW__*.json`) → `parse_sow`/ingest scripts → Supabase tables.
 
-**Key files:** `scratch/mig_1_tables.sql` → `mig_4_activities_resources.sql`, `Alsini_Physics_Schema_V1_Seed.sql`, `database/quiz_attempts_migration.sql`
+## 4. Guided Tour (11 steps)
 
-### 4. Scripts & Tooling Layer
-Data ingestion pipeline scripts, Supabase MCP server, Scheme of Work parsers, and RLS test utilities.
+1. **Project Overview** — read `gemini.md` for the full architecture and 13-phase roadmap.
+2. **Backend Server & AI Chat** — `backend/server.js` (Gemini chat + health route) and `backend/package.json`.
+3. **Python Backend** — `backend/requirements.txt` (FastAPI, Uvicorn, OpenAI/Gemini SDKs, PDF libs).
+4. **App Shell** — `frontend/src/main.jsx` (mount + KaTeX CSS) and `frontend/src/App.jsx` (auth session + routing).
+5. **Supabase & Auth** — `frontend/src/lib/supabaseClient.js` (singleton client) and `frontend/src/components/Auth.jsx`.
+6. **VLE Dashboard** — `frontend/src/components/VLEDashboard.jsx` + `Sidebar.jsx` (syllabus nav from Supabase).
+7. **AI Tutor** — `frontend/src/components/InteractiveTutor.jsx` + `HybridDocumentViewer.jsx`.
+8. **Quiz Engine** — `frontend/src/components/QuizEngine.jsx` + `quiz_attempts` table (RLS).
+9. **Schema & Seed** — `Alsini_Physics_Schema_V1_Seed.sql` + `mig_1_tables.sql` (`units`).
+10. **Ingestion Pipeline** — `scripts/ingest_pipeline.js` + `scripts/supabase_mcp.py`.
+11. **Agency Agents** — `agency-agents-main/README.md` + `lint-agents.yml` workflow.
 
-**Key files:** `scripts/ingest_pipeline.js`, `scripts/supabase_mcp.py`, `scratch/parse_sow.js`, `scratch/parse_sow.py`, `scratch/test_rls.js`
+## 5. File Map
 
-### 5. Project Configuration Layer
-Root and sub-project build manifests, bundler settings (Vite, PostCSS, Tailwind, ESLint), Git ignore rules, VS Code settings.
+### Frontend (`frontend/`)
+| File | Role | Complexity |
+|------|------|-----------|
+| `src/main.jsx` | App entry, mounts root, loads global/KaTeX CSS | simple |
+| `src/App.jsx` | Root component: auth session state + protected/public routing | moderate |
+| `src/lib/supabaseClient.js` | Singleton Supabase client from Vite env vars (fan-in: 8) | simple |
+| `src/components/Auth.jsx` | Login/register/password-reset, GSAP glassmorphic UI | moderate |
+| `src/components/UpdatePassword.jsx` | Secure password update page | moderate |
+| `src/components/VLEDashboard.jsx` | Authenticated main shell (sidebar + routes) | simple |
+| `src/components/Sidebar.jsx` | Syllabus hierarchy nav, Triple Science toggle, logout | moderate |
+| `src/components/InteractiveTutor.jsx` | **Flagship** split-screen AI tutor + tabbed resources | **complex** |
+| `src/components/HybridDocumentViewer.jsx` | Markdown / interactive JSON knowledge-graph viewer | moderate |
+| `src/components/QuizEngine.jsx` | Quiz taking, AI grading, attempt recording | moderate |
+| `src/components/NoiseOverlay.jsx` | SVG fractal noise background | simple |
+| `src/components/{Hero,Features,Philosophy,Protocol,Navbar,Footer,CTA,Button}.jsx` | Landing page sections & UI primitives | simple–moderate |
+| `src/{App.css,index.css}`, `index.html`, `public/*.svg`, `src/assets/*.svg` | Styles, HTML shell, SVG assets | — |
+| `tests/worksheet-tab.spec.js` | Playwright E2E for Worksheet tab | simple |
 
-**Key files:** Root `package.json`, `frontend/package.json`, `frontend/vite.config.js`, `frontend/tailwind.config.js`, `frontend/eslint.config.js`
+### Backend (`backend/`)
+| File | Role | Complexity |
+|------|------|-----------|
+| `server.js` | Express.js Gemini chat endpoint + health check | moderate |
+| `requirements.txt` | FastAPI/Uvicorn/OpenAI/Gemini/PDF deps | simple |
+| `package.json` | Express, Google GenAI SDK, CORS, dotenv | simple |
 
-### 6. Testing Layer
-Playwright end-to-end test specifications for the VLE Dashboard.
+### Data (`scratch/`, `database/`)
+| File | Role | Complexity |
+|------|------|-----------|
+| `mig_1_tables.sql` | Core 6-table schema (units, chapters, spec_points, activities, resources, questions) | simple |
+| `mig_2_units_chapters.sql` | Seeds 9 units + 28 chapters | simple |
+| `mig_3_specs.sql` | Seeds 190+ Edexcel specification points | moderate |
+| `mig_4_activities_resources.sql` | Seeds activities + TRP resources per spec point | moderate |
+| `save_my_exams_schema.sql` | Self-contained Save My Exams curriculum schema + data | **complex** |
+| `Alsini_Physics_Schema_V1_Seed.sql` | Forces & Motion unit seed (courses/chapters/topics) | simple |
+| `database/quiz_attempts_migration.sql` | `quiz_attempts` table + RLS policies | simple |
 
-**Key files:** `frontend/tests/worksheet-tab.spec.js`
+### Scripts (`scripts/`, `scratch/`)
+| File | Role | Complexity |
+|------|------|-----------|
+| `scripts/ingest_pipeline.js` | Sends PDFs to MinerU, maps parsed content → Supabase | **complex** |
+| `scripts/supabase_mcp.py` | MCP server exposing Supabase DB tools over stdio | moderate |
+| `scratch/parse_sow.js` | One-time SoW HTML → normalized SQL | moderate |
+| `scratch/parse_sow.py` | Python SoW parser (BeautifulSoup) → batched SQL | moderate |
+| `scratch/test_rls.js` | Anonymous read test for RLS on `units` | simple |
 
-### 7. Documentation Layer
-Project-level documentation including gemini.md summary, MCP Supabase configuration guide, and engineering role definitions.
+### Configuration
+| File | Role |
+|------|------|
+| `package.json` (root, `frontend/`, `backend/`) | Dependency manifests |
+| `frontend/vite.config.js` | Vite + React plugin |
+| `frontend/tailwind.config.js` | Dark theme palette, fonts, content paths |
+| `frontend/eslint.config.js` | React hooks + Vite refresh lint rules |
+| `.gitignore`, `.vscode/settings.json`, `MinerU_SOW__*.json` | Ignore rules, workspace, OCR metadata |
 
-**Key files:** `gemini.md`, `mcp_configuration_for_supabase.md`
+### Documentation
+`gemini.md` (main roadmap), `mcp_configuration_for_supabase.md`, `frontend/README.md`, `frontend/build-log.txt`, and `frontend/engineering/*.md` role definitions.
 
-### 8. Agency AI Agents Layer (external repo)
-200+ specialized AI agent personality documents spanning 12 divisions (engineering, design, marketing, sales, game development, spatial computing, etc.) with multi-tool integration scripts.
+## 6. Complexity Hotspots — approach carefully
 
-**Key files:** `agency-agents-main/README.md`
-
----
-
-## Key Concepts
-
-### Dual-Backend Architecture
-The platform uses **two backend servers** running simultaneously:
-- **Express.js** (port 5000) — handles `/api/chat` for Gemini AI chat, simple conversational flow
-- **FastAPI** (port 8000) — handles `/api/tutor` (semantic router), `/api/grade` (AI grading), `/api/question` — more powerful, async
-
-### Semantic Router (FastAPI)
-The `/api/tutor` endpoint evaluates query complexity:
-- **Simple/conversational** — routes to Gemini 2.5 Flash (cost-efficient)
-- **Complex/reasoning/grading** — routes to NVIDIA Llama 3.3 70B Instruct (higher capability)
-- Trigger keywords: "grade", "assess", "calculate", "derive", "prove", "solve"
-
-### Socratic AI Tutor Persona
-Both backends define a **Socratic Physics Tutor** persona that:
-- Never gives direct answers — guides students through questions
-- Targets Edexcel IGCSE and A-Level Physics curriculum
-- Returns responses as Markdown with KaTeX math rendering
-
-### Agentic UI Navigation
-The AI can control the frontend UI by emitting `[SWITCH_TAB: Quiz]` or `[SWITCH_TAB: Worksheet]` tags in its responses. The `InteractiveTutor.jsx` component parses these tags and switches tabs automatically — giving the AI agentic control over the student's learning flow.
-
-### AI Grading Engine (3-Mark Protocol)
-The `/api/grade` endpoint uses Llama 3.3 with a strict examiner persona:
-1. Internally solves the question from scratch
-2. Applies standard 3-mark scheme: Formula → Substitution → Accuracy
-3. Produces JSON: `{marks_awarded, total_marks, explanation}`
-4. Zero leniency — no rounding-error excuses, no follow-through credit
-
-### OpenKB Knowledge Graph
-Content resources can be rendered in two modes:
-- **Document View** — flat Markdown rendering
-- **Interactive Tutor View** — recursive expandable tree of JSON knowledge graph nodes (via `HybridDocumentViewer.jsx`)
-
-### Supabase + RLS
-Supabase PostgreSQL with Row-Level Security:
-- All authenticated users can SELECT curriculum tables
-- Per-user access on `quiz_attempts` via `auth.uid() = user_id`
-- MCP (Model Context Protocol) server at `scripts/supabase_mcp.py` for AI-assisted DB management
-
----
-
-## Guided Tour (11 Steps)
-
-| Step | Title | Key Files |
-|---|---|---|
-| 1 | **Project Overview** | `gemini.md` |
-| 2 | **Backend Server & AI Chat** | `backend/server.js`, `backend/package.json` |
-| 3 | **Python Backend Requirements** | `backend/requirements.txt` |
-| 4 | **Frontend Entry Point & App Shell** | `frontend/src/main.jsx`, `frontend/src/App.jsx` |
-| 5 | **Supabase Client & Authentication** | `frontend/src/lib/supabaseClient.js`, `frontend/src/components/Auth.jsx` |
-| 6 | **VLE Dashboard & Syllabus Navigation** | `frontend/src/components/VLEDashboard.jsx`, `frontend/src/components/Sidebar.jsx` |
-| 7 | **AI Interactive Tutor** | `frontend/src/components/InteractiveTutor.jsx`, `frontend/src/components/HybridDocumentViewer.jsx` |
-| 8 | **Quiz Engine & Assessment** | `frontend/src/components/QuizEngine.jsx`, `database/quiz_attempts_migration.sql` |
-| 9 | **Database Schema & Curriculum Seed** | `Alsini_Physics_Schema_V1_Seed.sql`, `scratch/mig_1_tables.sql` |
-| 10 | **Data Ingestion Pipeline** | `scripts/ingest_pipeline.js`, `scripts/supabase_mcp.py` |
-| 11 | **Agency AI Agents Collection** | `agency-agents-main/README.md` |
-
----
-
-## File Map (by Layer)
-
-### Frontend UI Layer
-| File | Purpose | Complexity |
-|---|---|---|
-| `App.jsx` | Root component with router, session listener, protected routes | moderate |
-| `main.jsx` | React DOM bootstrap + KaTeX CSS import | simple |
-| `supabaseClient.js` | Singleton Supabase client (fan-in: 8 — most-depended-upon file) | simple |
-| `Auth.jsx` | Login/signup/password-reset with GSAP glassmorphic animations | moderate |
-| `VLEDashboard.jsx` | Authenticated dashboard shell with sidebar + routes | moderate |
-| `Sidebar.jsx` | Curriculum hierarchy fetcher (units → chapters) from Supabase | moderate |
-| `InteractiveTutor.jsx` | **Flagship: AI chat + tabbed resource views + SWITCH_TAB parsing** | **complex** |
-| `HybridDocumentViewer.jsx` | Dual-mode viewer: Markdown or interactive OpenKB tree | moderate |
-| `QuizEngine.jsx` | Quiz UI: fetch question → user answers → AI grading → save attempt | moderate |
-| `Hero.jsx` | Landing page hero with GSAP animations | simple |
-| `Features.jsx` | Animated card shuffler + value props | moderate |
-
-### Backend Services Layer
-| File | Purpose | Complexity |
-|---|---|---|
-| `backend/server.js` | Express server with Gemini chat endpoint, Socratic persona | moderate |
-| `backend/main.py` | **FastAPI server with semantic router + AI grading + question endpoint** | **complex** |
-
-### Data Layer
-| File | Purpose | Complexity |
-|---|---|---|
-| `Alsini_Physics_Schema_V1_Seed.sql` | Original 4-tier course→chapter→topic→subtopic schema + seed data | simple |
-| `scratch/mig_1_tables.sql` → `mig_4_*.sql` | Incremental migrations to unified schema | moderate |
-| `database/quiz_attempts_migration.sql` | Quiz attempts table with RLS policies | simple |
-
-### Scripts & Tooling Layer
-| File | Purpose | Complexity |
-|---|---|---|
-| `scripts/ingest_pipeline.js` | **MinerU PDF → Supabase ingestion pipeline** | **complex** |
-| `scripts/supabase_mcp.py` | Custom MCP server for AI-assisted DB queries | moderate |
-
----
-
-## Complexity Hotspots
-
-These are the areas new developers should approach with care:
-
-| File | Why It's Complex |
-|---|---|
-| `frontend/src/components/InteractiveTutor.jsx` | 366-line flagship component. Manages split-screen chat + 4-tab resource views + AI SWITCH_TAB parsing + FastAPI integration + floating action button. Heavy state management with `useReducer`. |
-| `backend/main.py` | FastAPI orchestrator with semantic router (Gemini vs. Llama), 3 endpoints, strict AI grading protocol, Supabase context injection. Two different AI SDKs in one file. |
-| `scripts/ingest_pipeline.js` | Full data pipeline: walks directories, calls MinerU/OpenKB API, maps extracted JSON to Supabase tables with fuzzy name matching. |
-| `scripts/supabase_mcp.py` | Custom MCP server implementing the Model Context Protocol — non-trivial async tool registration. |
-
-> Note: 76 of the 80 "complex" file-level nodes are from the `agency-agents-main/` third-party repo. These are agent prompt documents, not runtime code. The 4 project-specific complex files listed above are the ones to focus on.
-
----
-
-## Quick Start
-
-```bash
-# Frontend
-cd frontend && npm install && npm run dev         # → localhost:5173
-
-# Backend (Express)
-cd backend && npm install && node server.js        # → localhost:5000
-
-# Backend (FastAPI)
-cd backend && pip install -r requirements.txt
-uvicorn main:app --reload --port 8000              # → localhost:8000
-
-# Tests
-cd frontend && npx playwright test
-```
-
-### Required Environment Variables
-
-**`backend/.env`**
-```
-GEMINI_API_KEY=<your-key>
-NVIDIA_API_KEY=<your-key>
-SUPABASE_URL=<your-url>
-SUPABASE_SERVICE_ROLE_KEY=<your-key>
-```
-
-**`frontend/.env.local`**
-```
-VITE_SUPABASE_URL=<your-url>
-VITE_SUPABASE_ANON_KEY=<your-anon-key>
-VITE_API_URL=http://localhost:5000
-```
+- **`frontend/src/components/InteractiveTutor.jsx`** (complex) — Flagship feature; split-screen chat + tabbed views + dual backend integration. Use `useReducer` for chat state.
+- **`scripts/ingest_pipeline.js`** (complex) — External MinerU dependency, PDF→DB mapping, fragile to OCR output changes.
+- **`scratch/save_my_exams_schema.sql`** (complex) — Large self-contained schema/seed; review before applying to avoid clobbering live data.
+- **`MinerU_SOW__20260412172453.json`** (complex) — 7 pages of OCR bounding boxes/spans; machine-generated, not hand-edited.
+- **`HybridDocumentViewer.jsx`** (moderate) — Dual Markdown/JSON-graph render modes with Framer Motion; view-state juggling.
+- **`backend/server.js`** + **FastAPI services** (moderate) — AI streaming + context management; watch token/cost limits.

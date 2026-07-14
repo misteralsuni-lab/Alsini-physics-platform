@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Bot, Send, Square, Network, FileText, X, Loader2 } from 'lucide-react';
+import { Bot, Send, Square, Network, FileText, X, Loader2, Search } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -24,6 +24,9 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   // and prefixes the next question with this focus so the tutor grounds its
   // answer in the selected learning object.
   const [focus, setFocus] = useState(null);
+
+  // Search panel toggle (Stage 5: exposes hybrid retrieval to the learner)
+  const [showSearch, setShowSearch] = useState(false);
   
   // Data Fetching States
   const [specPoints, setSpecPoints] = useState([]);
@@ -234,17 +237,34 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
              </div>
            </div>
            
-           {/* Tab Row */}
-           <div className="flex bg-[#111] border border-white/5 rounded-lg p-1 overflow-x-auto hide-scrollbar">
-              {['Lesson', 'Worksheet', 'Simulation', 'Quiz'].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab && setActiveTab(tab)}
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === tab ? 'bg-[#222] text-white shadow-sm border border-white/10' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                  {tab}
-                </button>
-              ))}
+           {/* Tab Row + Search Toggle */}
+           <div className="flex items-center gap-2">
+             <div className="flex bg-[#111] border border-white/5 rounded-lg p-1 overflow-x-auto hide-scrollbar">
+                {['Lesson', 'Worksheet', 'Simulation', 'Quiz'].map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab && setActiveTab(tab)}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === tab ? 'bg-[#222] text-white shadow-sm border border-white/10' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+             </div>
+             {/* Search Panel Toggle — only visible on Worksheet tab */}
+             {activeTab === 'Worksheet' && (
+               <button
+                 onClick={() => setShowSearch(!showSearch)}
+                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap flex items-center gap-1.5 border ${
+                   showSearch
+                     ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                     : 'bg-[#111] border-white/5 text-gray-500 hover:text-gray-300'
+                 }`}
+                 title="Toggle knowledge search"
+               >
+                 <Search className="w-3.5 h-3.5" />
+                 Search
+               </button>
+             )}
            </div>
          </div>
 
@@ -252,13 +272,28 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
          <div className="flex-1 flex flex-col relative overflow-hidden bg-gradient-to-b from-transparent to-[#050505]/50">
             <div className="flex-1 overflow-y-auto z-10 styled-scrollbar relative">
               {activeTab === 'Worksheet' ? (
-                // --- HYBRID DOCUMENT VIEWER INTEGRATION ---
-                <div className="w-full h-full">
-                  <HybridDocumentViewer
-                    resourceId={worksheetResource?.id}
-                    focus={focus}
-                    onFocus={setFocus}
-                  />
+                // --- HYBRID DOCUMENT VIEWER + SEARCH PANEL ---
+                <div className="flex w-full h-full">
+                  <div className={`${showSearch ? 'flex-1' : 'w-full'} h-full overflow-y-auto styled-scrollbar`}>
+                    <HybridDocumentViewer
+                      resourceId={worksheetResource?.id}
+                      focus={focus}
+                      onFocus={setFocus}
+                    />
+                  </div>
+                  {showSearch && (
+                    <div className="w-80 h-full flex-shrink-0">
+                      <SearchPanel
+                        resourceId={worksheetResource?.id}
+                        onNavigate={(result) => {
+                          // Navigate to the concept/learning content
+                          if (result.source_refs?.concept) {
+                            setFocus({ concept: result.source_refs.concept, type: 'concept' });
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : activeTab === 'Quiz' ? (
                 <div className="w-full h-full">
