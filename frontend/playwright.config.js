@@ -10,7 +10,7 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   fullyParallel: false,
   workers: 1,
-  retries: process.env.CI ? 1 : 0,
+  retries: 2,
   reporter: [['list']],
 
   use: {
@@ -24,6 +24,14 @@ export default defineConfig({
     launchOptions: {
       executablePath:
         '/home/alsuni/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome',
+      // The bundled chrome-headless-shell is missing system NSS libs in this
+      // environment; the full Chromium build needs libnspr4.so/libnss3.so on
+      // its library path. Point it at the extracted libs so every launch
+      // (including retried ones) resolves them regardless of the caller's env.
+      env: {
+        ...process.env,
+        LD_LIBRARY_PATH: '/tmp/chromelibs/usr/lib/x86_64-linux-gnu',
+      },
       args: [
         '--no-sandbox',
         '--disable-dev-shm-usage',

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { supabase } from './lib/supabaseClient';
 import Navbar from './components/Navbar';
 import NoiseOverlay from './components/NoiseOverlay';
@@ -11,7 +11,8 @@ import CTA from './components/CTA';
 import Footer from './components/Footer';
 import Auth from './components/Auth';
 import UpdatePassword from './components/UpdatePassword';
-import VLEDashboard from './components/VLEDashboard';
+import VLEDashboard, { DashboardHome } from './components/VLEDashboard';
+import InteractiveTutor from './components/InteractiveTutor';
 
 const Home = () => (
   <>
@@ -22,7 +23,7 @@ const Home = () => (
     <CTA />
   </>
 );
-const AppContent = ({ session }) => {
+const AppContent = ({ session, activeTab, setActiveTab }) => {
   const location = useLocation();
   const isAuthPage = location.pathname === '/auth' || location.pathname === '/update-password';
   const isDashboard = location.pathname.startsWith('/dashboard');
@@ -40,9 +41,15 @@ const AppContent = ({ session }) => {
         />
         <Route path="/update-password" element={<UpdatePassword />} />
         <Route 
-          path="/dashboard/*" 
-          element={session ? <VLEDashboard session={session} /> : <Navigate to="/auth" replace />} 
-        />
+          path="/dashboard" 
+          element={session ? <VLEDashboard session={session} /> : <Navigate to="/auth" replace />}
+        >
+          <Route index element={<DashboardHome />} />
+          <Route 
+            path="unit/:unitId/chapter/:chapterId" 
+            element={<InteractiveTutor activeTab={activeTab} setActiveTab={setActiveTab} />} 
+          />
+        </Route>
       </Routes>
       {!hideGlobalNavAndFooter && <Footer />}
     </main>
@@ -51,10 +58,13 @@ const AppContent = ({ session }) => {
 
 function App() {
   const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('Lesson');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      setLoading(false);
     });
 
     const {
@@ -66,9 +76,16 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  if (loading) {
+    // Avoid the initial null-session redirect-to-/auth that would drop a
+    // deep link (e.g. /dashboard/unit/.../chapter/...). Wait until the
+    // persisted session has been restored before routing.
+    return <div className="min-h-screen bg-[#050505]" />;
+  }
+
   return (
     <Router>
-      <AppContent session={session} />
+      <AppContent session={session} activeTab={activeTab} setActiveTab={setActiveTab} />
     </Router>
   );
 }

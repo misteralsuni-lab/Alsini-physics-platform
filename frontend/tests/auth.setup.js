@@ -4,7 +4,7 @@ import { test as setup, expect } from '@playwright/test';
 // Credentials resolve from env vars (CI) and fall back to the dedicated
 // E2E test account that is provisioned in the Supabase project.
 const EMAIL = process.env.E2E_EMAIL || 'e2e_test@alsini.dev';
-const PASSWORD = process.env.E2E_PASSWORD || 'E2Etest1234!';
+const PASSWORD = process.env.E2E_PASSWORD || 'E2Etest1234';
 const AUTH_FILE = 'playwright/.auth/user.json';
 
 setup('authenticate test account', async ({ page }) => {

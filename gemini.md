@@ -138,6 +138,21 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 ### 3.19. Quiz Engine
 - **`QuizEngine.jsx`**: New interactive quiz component that fetches a question for the active resource (`/api/question`) and submits student answers to the Gemini-backed `/api/grade` endpoint, rendering marks awarded and examiner feedback.
 
+### 3.20. Playwright Golden Regression Suite (QA Hardening)
+- **Four-Level Test Plan Executed**: Smoke (login/dashboard), Rendering (PDF + graph image HTTP 200), Synchronization (search → focus chip → tutor), and RAG (search results + cited sources) across the Golden Dataset worksheet (resource `5729d034-a6c7-4f35-b81c-fcac447289c7`, route `/dashboard/unit/2cf312d3-0f4b-4339-84f3-97b10b2907ea/chapter/b95f8fac-355e-4037-bc1f-2d3b2bf77140`).
+- **15-Check Permanent Suite**: `frontend/tests/regression.spec.js` covers the 10 planned checks ([1] login, [2] dashboard, [3] PDF render, [4] graph render, [5] knowledge search, [6] search→focus chip, [7] RAG citations, [8] no broken images, [9] no JS errors, [10] no failed network requests) plus cross-cutting Sync tests (A concept→focus→chat, B/D graph, GOLDEN end-to-end). `auth.setup.js` authenticates once and persists `playwright/.auth/user.json`.
+- **Real Bugs Found & Fixed During Testing**:
+  - `InteractiveTutor.jsx`: used `<ChevronLeft>` without importing it → added `ChevronLeft` to the lucide-react import.
+  - `App.jsx` + `VLEDashboard.jsx`: broken nested routing (inner `<Routes>` used non-absolute paths) → refactored to `<Outlet>` with `/dashboard` index + `/dashboard/unit/:unitId/chapter/:chapterId`.
+  - `App.jsx`: protected routes redirected to `/auth` during the initial null-session before async `getSession()` resolved, dropping deep links → added a `loading` state that waits for session restore before routing.
+- **Environment Hardening (Critical)**:
+  - The bundled `chrome-headless-shell` was missing `libnspr4.so`/`libnspr4`/`libnss3.so`. Fixed by extracting the debs to `/tmp/chromelibs/usr/lib/x86_64-linux-gnu` and launching the full Chromium at `/home/alsuni/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome` with `LD_LIBRARY_PATH` baked into `playwright.config.js` `launchOptions.env` (so every launch, including retries, resolves the libs). Launch args: `--no-sandbox --disable-dev-shm-usage --disable-gpu --disable-software-rasterizer`.
+  - Added `retries: 2` to survive intermittent headless-Chrome crashes ("Channel closed").
+  - **E2E Test User**: `e2e_test@alsuni.dev` / `E2Etest1234` (the original `!`-suffixed password was mangled by shell history-expansion during creation; recreated cleanly via Supabase admin API and verified sign-in via the REST token endpoint).
+  - Dev servers must be started with `setsid … < /dev/null &` to survive the bash tool; backend `:8000` and frontend `:5173` both verified healthy.
+  - **Known QA footgun**: `pkill -f "chrome-linux64/chrome"` / `pgrep -f test-server` match their *own* command line and kill the shell — kill by explicit PID instead (e.g. `ps -eo pid,args | grep -E "chrome-linu[x]64" | grep -v grep | awk '{print $1}' | xargs -r kill -9`).
+- **Current Status**: Setup + [1] login + [2] dashboard + [3] PDF + [4] graph all PASS. The search flow (`/api/search/hybrid`) was proven working in isolation (returns 200, 10 results). The full run is blocked on check [5] (Knowledge search) hanging when run through the Playwright runner (identical flow in a standalone script finishes in ~15s) — under active debug (see §5).
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
@@ -147,6 +162,7 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Backend Connection Errors**: Debugged network 'Connection error' between frontend and backend by implementing permissive CORS settings for local development, adding X-Ray logging, and improving error handling in `backend/server.js`.
 
 ## 5. Next Steps
+- **Finish the Regression Suite (IMMEDIATE)**: Resolve the [5] Knowledge-search hang in the Playwright runner (investigate `waitForResponse` predicate / `Promise.all` ordering vs. the standalone `dbgsearch.mjs` which works), then get all 15 checks green (`cd frontend && npx playwright test --workers=1`). Fix any subsequent [6]/[A]/[B]/[D]/[7]–[10]/GOLDEN failures by reading `frontend/test-results/<test>/error-context.md`. Remove debug scripts (`frontend/dbglogin.mjs`, `frontend/dbgsearch.mjs`) once green.
 - **Frontend Asset Rendering**: Wire `resource_assets` into `HybridDocumentViewer`/`SearchPanel` so extracted graphs and plotting grids render inline (the `<img>` rendering gap noted in the forensic investigation).
 - **Tutor ↔ Search Unification**: Have the AI Tutor call `/api/search` (RAG) per question rather than the scoped `match_resource_chunks` retrieval, and generalize beyond the single Golden Dataset resource (`TARGET_RESOURCE_ID`).
 - **Backend Consolidation**: Unify Express (`server.js`) and FastAPI (`main.py`) behind one port / reverse proxy so the frontend only targets a single API origin.

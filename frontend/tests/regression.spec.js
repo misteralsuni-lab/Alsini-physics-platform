@@ -41,6 +41,11 @@ async function installDiagnostics(page) {
 
 // Open the Golden Dataset worksheet (Worksheet tab + PDF iframe visible).
 async function openWorksheet(page) {
+  // Land on /dashboard first so the async Supabase session is restored.
+  // (A direct deep-link to a chapter route hits the initial null-session
+  // redirect to /auth and would drop the deep link.)
+  await page.goto('/dashboard');
+  await expect(page.getByRole('button', { name: 'Sign Out' })).toBeVisible({ timeout: 20_000 });
   await page.goto(DASHBOARD_URL);
   const worksheetTab = page.getByRole('button', { name: 'Worksheet', exact: true });
   await expect(worksheetTab).toBeVisible({ timeout: 20_000 });
@@ -100,8 +105,8 @@ test('[1] User can log in', async ({ page }) => {
   await page.evaluate(() => localStorage.clear());
   await page.goto('/auth');
   await expect(page.getByPlaceholder('Email Address')).toBeVisible({ timeout: 20_000 });
-  await page.getByPlaceholder('Email Address').fill(process.env.E2E_EMAIL || 'e2e_test@alsuni.dev');
-  await page.getByPlaceholder('Password').fill(process.env.E2E_PASSWORD || 'E2Etest1234!');
+  await page.getByPlaceholder('Email Address').fill(process.env.E2E_EMAIL || 'e2e_test@alsini.dev');
+  await page.getByPlaceholder('Password').fill(process.env.E2E_PASSWORD || 'E2Etest1234');
   await page.getByRole('button', { name: 'Login', exact: true }).click();
   await page.waitForURL('**/dashboard**', { timeout: 20_000 });
   await expect(page).toHaveURL(/\/dashboard/);
