@@ -2,6 +2,10 @@ node_modules/
 .env
 .env.local
 backend/*.pdf
+frontend/playwright/.auth/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
 .understand-anything
 python_interpreter/
 mcp_configuration_for_supabase

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Bot, Send, Square, Network, FileText, X, Loader2, Search } from 'lucide-react';
+import { Bot, Send, Square, Network, FileText, X, Loader2, Search, ChevronLeft } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
