@@ -173,7 +173,7 @@ const InteractiveTutor = ({ activeTab = 'Lesson', setActiveTab }) => {
   };
 
   return (
-    <div className="h-full w-full flex p-4 sm:p-6 lg:gap-6 relative overflow-hidden bg-[#050505]">
+    <div className="h-full w-full flex p-4 sm:p-6 lg:gap-6 relative overflow-hidden bg-[#050505] min-h-[500px]">
       
       {/* Floating Action Button (Ask Tutor) */}
       {!isTutorOpen && (

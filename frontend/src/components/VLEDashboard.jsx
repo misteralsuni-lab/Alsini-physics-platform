@@ -33,11 +33,14 @@ const VLEDashboard = ({ session }) => {
       
       {/* Scrollable Main Content Pane */}
       <main className="flex-1 overflow-hidden relative z-10 flex flex-col">
-        {/* We can place the top-right user controls here later if needed, but for now just the content */}
         <div className="flex-1 h-full overflow-y-auto styled-scrollbar">
            <Routes>
              <Route path="/" element={<div className="py-8 min-h-full"><DashboardHome /></div>} />
-             <Route path="/unit/:unitId/chapter/:chapterId" element={<InteractiveTutor activeTab={activeTab} setActiveTab={setActiveTab} />} />
+             <Route path="/unit/:unitId/chapter/:chapterId" element={
+               <div className="h-full min-h-[500px]">
+                 <InteractiveTutor activeTab={activeTab} setActiveTab={setActiveTab} />
+               </div>
+             } />
            </Routes>
         </div>
       </main>
