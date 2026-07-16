@@ -293,6 +293,28 @@ Every structural promise in `FRONTEND_INTEGRATION.md` is honoured by
 the current source. The single missing import is collapsing the app
 silently.
 
+### Trigger vs root cause (post-mortem discipline)
+
+- **Trigger** (the proximate mistake): during commit `bca1dac`
+  the import list grew `Search` (and later `ChevronLeft`) but `User`
+  was never added. The runtime only references `<User />` from the
+  user-role message rendering branch — a code path no visual smoke
+  test exercises — so the regression shipped green on every prior
+  build/lint.
+- **Symptoms users reported** (worksheet frozen, no visible search,
+  PDF misbehaving, interactive worksheet "broken") are all
+  downstream of the ReferenceError on the first chat message.
+- **Root cause (systemic gap, out of scope for this fix)**: the
+  project's ESLint config (`frontend/eslint.config.js`) does not
+  enable `eslint-plugin-react`'s `react/jsx-no-undef` rule, and the
+  build (vite/esbuild/SWC) does not perform JSX-scope analysis
+  either. Without a static gate, the same class of bug
+  (referenced-but-unimported JSX icon) will recur every time a
+  maintainer edits an import line. Recommended follow-up (not done
+  here, per minimal-fix mandate): add `eslint-plugin-react` and a
+  `react/jsx-no-undef: 'error'` rule, plus a `React Quick API`
+  smoke test that sends at least one user-role chat message.
+
 ---
 
 ## Evidence index
