@@ -59,7 +59,7 @@ const AppContent = ({ session, activeTab, setActiveTab }) => {
 function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('Lesson');
+  const [activeTab, setActiveTab] = useState('Worksheet');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

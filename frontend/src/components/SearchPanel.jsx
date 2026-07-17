@@ -1,6 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { Search, Loader2, X, FileText, ArrowUpRight } from 'lucide-react';
 
+// Backend API base URL — sourced from env, falls back to localhost:8000 for dev.
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 /**
  * SearchPanel — Exposes hybrid retrieval to the learner.
  *
@@ -49,7 +52,7 @@ const SearchPanel = ({ resourceId, onNavigate }) => {
       if (resourceId) body.resource_id = resourceId;
       if (filterChunkType) body.chunk_type = filterChunkType;
 
-      const resp = await fetch('http://localhost:8000/api/search/hybrid', {
+      const resp = await fetch(`${API_BASE}/api/search/hybrid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

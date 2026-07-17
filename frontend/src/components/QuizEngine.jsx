@@ -5,6 +5,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 
+// Backend API base URL — sourced from env, falls back to localhost:8000 for dev.
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const QuizEngine = ({ resourceId, activeSpecPointId }) => {
   const [questionIndex, setQuestionIndex] = useState(1);
   const [questionText, setQuestionText] = useState("Loading question...");
@@ -19,7 +22,7 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
   useEffect(() => {
     const fetchQuestion = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/question?resource_id=${resourceId || ''}`);
+        const response = await fetch(`${API_BASE}/api/question?resource_id=${resourceId || ''}`);
         if (response.ok) {
           const data = await response.json();
           setQuestionIndex(data.question_index);
@@ -53,14 +56,14 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
       
       const payload = {
         student_id: studentId,
-        resource_id: resourceId || "5729d034-a6c7-4f35-b81c-fcac447289c7", // Fallback forces resource
+        resource_id: resourceId,  // Dynamic — passed from the parent based on selected worksheet
         question_index: questionIndex,
         student_answer: studentAnswer,
         max_score: maxScore,
         question_text: questionText
       };
-      
-      const response = await fetch('http://localhost:8000/api/grade', {
+
+      const response = await fetch(`${API_BASE}/api/grade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

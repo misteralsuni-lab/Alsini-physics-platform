@@ -54,6 +54,10 @@ class Message(BaseModel):
 class TutorRequest(BaseModel):
     student_prompt: str
     history: Optional[List[Message]] = []
+    # Dynamic RAG scope — the frontend passes the currently selected
+    # worksheet's resource_id so retrieval is scoped to it. If absent,
+    # retrieval runs unscoped (returns chunks across all resources).
+    resource_id: Optional[str] = None
 
 class TutorSource(BaseModel):
     chunk_id: str
@@ -61,6 +65,10 @@ class TutorSource(BaseModel):
     page: Optional[int] = None
     chunk_type: str
     similarity: Optional[float] = None
+    # Traceability fields — exposed for developer-mode citation expansion.
+    resource_id: Optional[str] = None
+    specification_point_id: Optional[str] = None
+    chunk_index: Optional[int] = None
 
 class TutorResponse(BaseModel):
     response: str
@@ -81,6 +89,10 @@ class GradeResponse(BaseModel):
     explanation: str
 
 # Constants
+# NOTE: TARGET_RESOURCE_ID is retained ONLY for /api/grade's legacy
+# full-context fetch (fetch_forces_and_motion_data). The RAG /api/tutor
+# endpoint no longer uses this — it receives resource_id dynamically
+# from the frontend. Do NOT add new uses of this constant.
 TARGET_RESOURCE_ID = "5729d034-a6c7-4f35-b81c-fcac447289c7" # Forces and Motion Resource
 TUTOR_CHUNK_COUNT = 5  # top-N chunks to inject as RAG context
 
@@ -88,10 +100,23 @@ TUTOR_CHUNK_COUNT = 5  # top-N chunks to inject as RAG context
 # RAG Retrieval Helpers (reuse existing _embed_query and _supabase_headers)
 # -------------------------------------------------------------------
 
-def _retrieve_relevant_chunks(query: str, match_count: int = TUTOR_CHUNK_COUNT) -> list[dict]:
+def _retrieve_relevant_chunks(
+    query: str,
+    match_count: int = TUTOR_CHUNK_COUNT,
+    resource_id: Optional[str] = None,
+) -> list[dict]:
     """
-    Embed the student's question, call match_resource_chunks RPC scoped to
-    the Golden Dataset resource, and return ranked chunks for RAG context.
+    Embed the student's question, call match_resource_chunks RPC, and
+    return ranked chunks for RAG context.
+
+    Retrieval scope is dynamic:
+      - If `resource_id` is provided, the RPC's `filter_resource_id`
+        parameter is set to it so chunks are scoped to the CURRENTLY
+        SELECTED worksheet only (dynamic tutor scope).
+      - If `resource_id` is None, retrieval is unscoped (returns chunks
+        across all resources) — used as a fallback when the frontend
+        has not resolved a worksheet yet.
+
     Returns empty list on any failure (non-fatal — tutor still works).
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -109,8 +134,14 @@ def _retrieve_relevant_chunks(query: str, match_count: int = TUTOR_CHUNK_COUNT) 
         rpc_body = {
             "query_embedding": vec_str,
             "match_count": min(match_count, 10),
-            "filter_resource_id": TARGET_RESOURCE_ID,
         }
+        # Dynamic RAG scope: filter by the frontend-supplied resource_id
+        # if present. This is the root-cause fix for the "tutor always
+        # answers from Unit 1 / Forces and Motion" bug — retrieval is now
+        # scoped to whatever worksheet the student is viewing.
+        if resource_id:
+            rpc_body["filter_resource_id"] = resource_id
+
         resp = requests.post(
             f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
             headers=headers,
@@ -120,7 +151,12 @@ def _retrieve_relevant_chunks(query: str, match_count: int = TUTOR_CHUNK_COUNT) 
         if resp.status_code != 200:
             print(f"[RAG] RPC failed ({resp.status_code}): {resp.text[:120]}")
             return []
-        return resp.json()
+        chunks = resp.json()
+        # Attach resource_id onto each chunk for traceability in TutorSource.
+        if resource_id:
+            for c in chunks:
+                c.setdefault("resource_id", resource_id)
+        return chunks
     except Exception as e:
         print(f"[RAG] Retrieval error (non-fatal): {e}")
         return []
@@ -130,7 +166,7 @@ def _format_chunks_as_context(chunks: list[dict]) -> str:
     """Build a compact, citation-rich context block from retrieved chunks."""
     if not chunks:
         return ""
-    lines = ["Retrieved educational context (from the Forces and Motion resource):"]
+    lines = ["Retrieved educational context:"]
     for i, c in enumerate(chunks):
         idx = i + 1
         ctype = c.get("chunk_type", "concept")
@@ -161,6 +197,10 @@ def _chunks_to_sources(chunks: list[dict]) -> list[TutorSource]:
             page=(c.get("source_refs") or {}).get("page"),
             chunk_type=c.get("chunk_type", "concept"),
             similarity=c.get("similarity"),
+            # Traceability fields for developer-mode citation expansion.
+            resource_id=c.get("resource_id"),
+            specification_point_id=c.get("specification_point_id"),
+            chunk_index=c.get("chunk_index"),
         )
         for c in chunks
     ]
@@ -199,29 +239,15 @@ def fetch_forces_and_motion_data():
 # Semantic Router Logic
 def evaluate_routing(prompt: str) -> str:
     """
-    Evaluates the prompt to determine which provider to route to.
-    Priority: OpenCode Zen (primary) → NVIDIA (fallback) → Gemini (last resort).
+    Routes all queries to OpenCode Zen (primary) with NVIDIA as fallback.
+    Gemini is removed due to quota limits — all traffic goes through OpenCode Zen.
     """
-    complex_keywords = [
-        "grade", "assess", "mark", "calculate", "derive", 
-        "evaluate", "worksheet", "forces and motion", 
-        "deep", "complex", "reasoning", "why does", "prove",
-        "solve"
-    ]
-    
-    prompt_lower = prompt.lower()
-    
-    # Complex tasks → OpenCode Zen (primary provider, highest weight)
-    if any(keyword in prompt_lower for keyword in complex_keywords) or len(prompt) > 100:
-        if opencode_zen_client:
-            print("Semantic Router: Routing to OPENCODE_ZEN (primary)")
-            return "OPENCODE_ZEN"
-        if nvidia_client:
-            print("Semantic Router: Routing to NVIDIA (fallback)")
-            return "NVIDIA"
-    
-    # Simple/conversational → Gemini
-    print("Semantic Router: Routing to GEMINI")
+    if opencode_zen_client:
+        print("Semantic Router: Routing to OPENCODE_ZEN")
+        return "OPENCODE_ZEN"
+    if nvidia_client:
+        print("Semantic Router: Routing to NVIDIA")
+        return "NVIDIA"
     return "GEMINI"
 
 
@@ -263,9 +289,13 @@ async def tutor_endpoint(request: TutorRequest):
 
     # --- RAG Retrieval ---
     # Replace the old full-JSON dump with targeted hybrid retrieval.
-    # Embed the student's question, search resource_chunks scoped to the
-    # Golden Dataset resource, and inject only the top-N relevant chunks.
-    retrieved_chunks = _retrieve_relevant_chunks(request.student_prompt)
+    # Dynamic scope: pass the frontend-supplied resource_id so the
+    # tutor grounds its answer in the CURRENTLY SELECTED worksheet,
+    # not a hardcoded resource.
+    retrieved_chunks = _retrieve_relevant_chunks(
+        request.student_prompt,
+        resource_id=request.resource_id,
+    )
     rag_context = _format_chunks_as_context(retrieved_chunks)
     sources = _chunks_to_sources(retrieved_chunks)
 

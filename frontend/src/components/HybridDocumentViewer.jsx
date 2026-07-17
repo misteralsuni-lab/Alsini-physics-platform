@@ -217,7 +217,7 @@ const ConceptPopup = ({ block, onClose, onSelectRelated }) => (
   </motion.div>
 );
 
-const HybridDocumentViewer = ({ resourceId, focus, onFocus }) => {
+const HybridDocumentViewer = ({ resourceId, focus, onFocus, conceptCardRefs }) => {
   const [viewMode, setViewMode] = useState('document'); // 'document' | 'interactive'
   const [data, setData] = useState(null);
   const [assets, setAssets] = useState([]);
@@ -523,6 +523,11 @@ const HybridDocumentViewer = ({ resourceId, focus, onFocus }) => {
                       return (
                       <motion.button
                         key={i}
+                        ref={(el) => {
+                          if (conceptCardRefs && conceptCardRefs.current) {
+                            conceptCardRefs.current[b.concept] = el;
+                          }
+                        }}
                         variants={itemVariants}
                         onClick={() => {
                           setSelectedIdx(i);
