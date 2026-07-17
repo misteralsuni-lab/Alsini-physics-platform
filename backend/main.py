@@ -28,6 +28,7 @@ app.add_middleware(
 # Environment Variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+OPENCODE_ZEN_API_KEY = os.getenv("OPENCODE_ZEN_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
 
@@ -39,6 +40,11 @@ nvidia_client = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
     api_key=NVIDIA_API_KEY
 ) if NVIDIA_API_KEY else None
+
+opencode_zen_client = OpenAI(
+    base_url="https://opencode.ai/zen/v1",
+    api_key=OPENCODE_ZEN_API_KEY
+) if OPENCODE_ZEN_API_KEY else None
 
 # Pydantic Models for Request Validation
 class Message(BaseModel):
@@ -193,7 +199,8 @@ def fetch_forces_and_motion_data():
 # Semantic Router Logic
 def evaluate_routing(prompt: str) -> str:
     """
-    Evaluates the prompt to determine whether it should be routed to Gemini Flash or Nvidia Llama 3.3.
+    Evaluates the prompt to determine which provider to route to.
+    Priority: OpenCode Zen (primary) → NVIDIA (fallback) → Gemini (last resort).
     """
     complex_keywords = [
         "grade", "assess", "mark", "calculate", "derive", 
@@ -204,14 +211,50 @@ def evaluate_routing(prompt: str) -> str:
     
     prompt_lower = prompt.lower()
     
-    # If the prompt is long or contains complex reasoning/grading keywords, route to Nvidia
+    # Complex tasks → OpenCode Zen (primary provider, highest weight)
     if any(keyword in prompt_lower for keyword in complex_keywords) or len(prompt) > 100:
-        print("Semantic Router: Routing to NVIDIA (Llama 3.3)")
-        return "NVIDIA"
+        if opencode_zen_client:
+            print("Semantic Router: Routing to OPENCODE_ZEN (primary)")
+            return "OPENCODE_ZEN"
+        if nvidia_client:
+            print("Semantic Router: Routing to NVIDIA (fallback)")
+            return "NVIDIA"
     
-    # Otherwise, simple/conversational goes to Gemini
-    print("Semantic Router: Routing to GEMINI (Flash 2.5)")
+    # Simple/conversational → Gemini
+    print("Semantic Router: Routing to GEMINI")
     return "GEMINI"
+
+
+def _call_opencode_zen(messages: list, system_prompt: str) -> tuple[str, str]:
+    full_messages = [{"role": "system", "content": system_prompt}] + messages
+
+    response = opencode_zen_client.chat.completions.create(
+        model="deepseek-v4-flash-free",
+        messages=full_messages,
+        temperature=0.2,
+        max_tokens=4096,
+        timeout=120,
+    )
+    content = response.choices[0].message.content
+    if not content:
+        raise HTTPException(status_code=502, detail="OpenCode Zen returned empty response")
+    return content, "OPENCODE_ZEN_DEEPSEEK_V4_FLASH_FREE"
+
+
+def _call_nvidia(messages: list, system_prompt: str) -> tuple[str, str]:
+    full_messages = [{"role": "system", "content": system_prompt}] + messages
+
+    response = nvidia_client.chat.completions.create(
+        model="nvidia/nemotron-3-super-120b-a12b",
+        messages=full_messages,
+        temperature=0.2,
+        max_tokens=4096,
+        timeout=120,
+    )
+    content = response.choices[0].message.content
+    if not content:
+        raise HTTPException(status_code=502, detail="NVIDIA returned empty response")
+    return content, "NVIDIA_NEMOTRON_3_SUPER_120B"
 
 @app.post("/api/tutor", response_model=TutorResponse)
 async def tutor_endpoint(request: TutorRequest):
@@ -249,46 +292,49 @@ async def tutor_endpoint(request: TutorRequest):
             + rag_context + "\n"
         )
 
-    if route_target == "NVIDIA":
-        # Route to Nvidia Llama 3.3 for complex/grading tasks
-        if not nvidia_client:
-            raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
-
-        messages = [{"role": "system", "content": system_prompt}]
-
-        # Add history
+    if route_target == "OPENCODE_ZEN":
+        # Route to OpenCode Zen (primary) with NVIDIA fallback
+        messages = []
         for msg in request.history:
             messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.content})
-
-        # Add current message
         messages.append({"role": "user", "content": request.student_prompt})
 
         try:
-            response = nvidia_client.chat.completions.create(
-                model="meta/llama-3.3-70b-instruct",
-                messages=messages,
-                temperature=0.2,
-                max_tokens=2048,
-            )
-            reply = response.choices[0].message.content
-            return TutorResponse(response=reply, model_used="NVIDIA_LLAMA_3.3", sources=sources)
+            reply, model_used = _call_opencode_zen(messages, system_prompt)
+            return TutorResponse(response=reply, model_used=model_used, sources=sources)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Nvidia API Error: {str(e)}")
+            print(f"OpenCode Zen failed, falling back to NVIDIA: {e}")
+            if not nvidia_client:
+                raise
+            reply, model_used = _call_nvidia(messages, system_prompt)
+            return TutorResponse(response=reply, model_used=model_used, sources=sources)
+
+    elif route_target == "NVIDIA":
+        if not nvidia_client:
+            raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
+
+        messages = []
+        for msg in request.history:
+            messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.content})
+        messages.append({"role": "user", "content": request.student_prompt})
+
+        try:
+            reply, model_used = _call_nvidia(messages, system_prompt)
+            return TutorResponse(response=reply, model_used=model_used, sources=sources)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"NVIDIA API Error: {str(e)}")
 
     else:
-        # Route to Gemini Flash for simple/conversational tasks
+        # Route to Gemini Flash for simple/conversational tasks (last resort)
         if not GEMINI_API_KEY:
             raise HTTPException(status_code=500, detail="GEMINI API is not configured.")
 
         try:
-            # Format history for Gemini API
             gemini_history = []
             for msg in request.history:
-                # Map role correctly ('user' or 'model')
                 role = "user" if msg.role == "user" else "model"
                 gemini_history.append({"role": role, "parts": [{"text": msg.content}]})
 
-            # Initialize model with system instruction
             local_model = genai.GenerativeModel(
                 'gemini-2.5-flash',
                 system_instruction=system_prompt
@@ -629,9 +675,6 @@ async def get_question(resource_id: Optional[str] = None):
 
 @app.post("/api/grade", response_model=GradeResponse)
 async def grade_endpoint(request: GradeRequest):
-    if not nvidia_client:
-        raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
-        
     context_data = fetch_forces_and_motion_data()
     
     system_prompt = (
@@ -678,34 +721,47 @@ async def grade_endpoint(request: GradeRequest):
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
     ]
-    
-    try:
-        response = nvidia_client.chat.completions.create(
-            model="meta/llama-3.3-70b-instruct",
-            messages=messages,
-            temperature=0.1,
-            max_tokens=1024,
-        )
-        reply = response.choices[0].message.content
-        
-        # Robust parsing for JSON
-        # Attempt to parse directly first
+
+    # Try OpenCode Zen first, fall back to NVIDIA
+    def _parse_grade_reply(reply: str) -> GradeResponse:
         try:
             parsed_json = json.loads(reply)
         except json.JSONDecodeError:
-            # Fallback regex if LLM wraps in ```json ... ```
             match = re.search(r'\{.*\}', reply, re.DOTALL)
             if match:
                 parsed_json = json.loads(match.group(0))
             else:
                 raise ValueError("Could not extract JSON from LLM response.")
-                
         return GradeResponse(
             marks_awarded=parsed_json.get("marks_awarded", 0),
             total_marks=request.max_score,
             explanation=parsed_json.get("explanation", "No explanation provided.")
         )
-        
-    except Exception as e:
-        print(f"Grading Error: {e}")
-        raise HTTPException(status_code=500, detail=f"Grading Engine Error: {str(e)}")
+
+    if opencode_zen_client:
+        try:
+            response = opencode_zen_client.chat.completions.create(
+                model="deepseek-v4-flash-free",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=2048,
+            )
+            reply = response.choices[0].message.content
+            return _parse_grade_reply(reply)
+        except Exception as e:
+            print(f"OpenCode Zen grading failed, falling back to NVIDIA: {e}")
+
+    if nvidia_client:
+        try:
+            response = nvidia_client.chat.completions.create(
+                model="nvidia/nemotron-3-super-120b-a12b",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=2048,
+            )
+            reply = response.choices[0].message.content
+            return _parse_grade_reply(reply)
+        except Exception as e:
+            print(f"NVIDIA grading also failed: {e}")
+
+    raise HTTPException(status_code=500, detail="All grading providers failed.")

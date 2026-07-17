@@ -153,6 +153,44 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
   - **Known QA footgun**: `pkill -f "chrome-linux64/chrome"` / `pgrep -f test-server` match their *own* command line and kill the shell — kill by explicit PID instead (e.g. `ps -eo pid,args | grep -E "chrome-linu[x]64" | grep -v grep | awk '{print $1}' | xargs -r kill -9`).
 - **Current Status**: Setup + [1] login + [2] dashboard + [3] PDF + [4] graph all PASS. The search flow (`/api/search/hybrid`) was proven working in isolation (returns 200, 10 results). The full run is blocked on check [5] (Knowledge search) hanging when run through the Playwright runner (identical flow in a standalone script finishes in ~15s) — under active debug (see §5).
 
+### 3.21. Frontend Forensic Investigation & Critical Bug Fix
+- **Missing `User` Import Crash**: Discovered that the `<User>` lucide-react icon was missing from the import list in `InteractiveTutor.jsx:3`, causing a silent `ReferenceError` every time the student sent their first chat message. This single bug cascaded into every reported symptom — frozen worksheet, invisible search panel, broken PDF interaction — because React unmounted the component tree on the unrecoverable error.
+- **Fix** (commit `c9616f2`): Added `User` to the lucide-react import. One-line change, verified via AST probes (`dbgastall.mjs`), live Vite transform inspection, and module-level resolution check (`dbgverify.mjs`).
+- **Why Build Didn't Catch It**: Vite/esbuild does not perform `react/jsx-no-undef` analysis. ESLint lacks the `eslint-plugin-react` rule. The bug only fired on user-role message render — a path no smoke test exercised.
+- **Full forensic report**: `FRONTEND_FORENSIC_REPORT.md` documents the 10-step root cause analysis, evidence chain, and cascading symptom explanation.
+
+### 3.22. Multi-Agent Forensic V2 & Bug Taxonomy
+- **7-Specialist Investigation** (commit `3e27c5f`): Senior React Engineer, Frontend Architect, UX Engineer, Accessibility Engineer, Full Stack Engineer, Code Reviewer, and Incident Response Commander conducted a read-only forensic analysis.
+- **Architecture Verdict**: Routing, component boundaries, and data flow wiring are **sound**. The PDF and asset rendering chains work end-to-end. The Search panel is correctly implemented.
+- **9 Bugs Identified & Ranked** (documented in `FRONTEND_FORENSIC_REPORT_V2.md`):
+  - **SEV-1 (High)**:
+    - **BUG-1**: Worksheet not visible by default — `activeTab` defaults to `'Lesson'` which renders a placeholder. Students must discover the `Worksheet` tab manually.
+    - **BUG-2**: No specification point selector UI — `specPoints` array is fetched from Supabase but never rendered. Only `data[0].id` is auto-selected. ESLint confirms unused state.
+  - **SEV-2 (Medium)**:
+    - **BUG-3**: RAG tutor hardcoded to Forces and Motion resource (`TARGET_RESOURCE_ID` in `main.py:78`) — tutor grounds answers in wrong resource for other chapters.
+    - **BUG-4**: Resource fetch only triggers on Worksheet tab guard — no pre-loading, chicken-and-egg with BUG-1.
+    - **BUG-5**: Dual tab systems unsynchronized — `activeTab` (Lesson/Worksheet) and `viewMode` (document/interactive) are independent with no cross-component sync.
+    - **BUG-6**: Backend URLs hardcoded to `localhost:8000` across 4 files — breaks on deployment.
+  - **SEV-3 (Low)**:
+    - **BUG-7**: SearchPanel `onNavigate` sets concept focus but doesn't scroll HDV to the matching card.
+    - **BUG-8**: Express `server.js` is dead code — FastAPI port 8000 has fully replaced it.
+    - **BUG-9**: `Square` icon imported but unused; pre-existing lint errors (5 unused vars).
+
+### 3.23. Engineering Review & Post-Mortem
+- **Consolidated 7-Agent Engineering Review** (commit `afb7bbb`): Cross-functional review board assessed Session 3 against architecture, frontend, backend, AI/ML, UX, accessibility, and QA lenses.
+- **Score**: **6.71 / 10 — Beta readiness** (`SESSION_3_ENGINEERING_REVIEW.md`)
+- **Key Strengths**: Strong separation of retrieval concerns (8.5/10), reuse over reinvention (9/10), citation-first UX (8/10), honest hardening (7/10).
+- **Key Weaknesses**: Hardcoded backend URLs (4/10), singleton resource pointer, bidirectional sync has no contract, no automated RAG tests, accessibility gaps (4.5/10 from Accessibility Auditor — color contrast on citation chips fails WCAG AA, toggle has no ARIA roles, concept cards lack labels).
+- **Trigger vs Root Cause Post-Mortem** (commit `2870d92`):
+  - **Trigger**: Missing `User` import (proximate mistake during import list maintenance).
+  - **Root Cause (systemic)**: No ESLint `react/jsx-no-undef` rule and no build-time JSX-scope analysis — same class of bug will recur without a static gate.
+  - **Root Cause (design)**: Two independent tab systems (`activeTab` vs `viewMode`) designed without reconciliation of their defaults.
+
+### 3.24. Environment & Config Hardening
+- **VSCode Settings** (commit `1f7acc3`): Initialized `.vscode/settings.json` for standardized IDE configuration.
+- **Git Ignore & Package Management** (commit `c7e0208`): Updated `.gitignore` rules and `package.json` for improved dependency management.
+- **Debug Scripts**: Added `frontend/dbglogin.mjs` and `frontend/dbgsearch.mjs` for standalone Playwright flow verification (to be removed once regression suite is fully green).
+
 ## 4. Troubleshooting & Architecture Changes
 - **Build Configurations**: Resolved numerous Vite and production build errors to ensure the platform compiles successfully.
 - **NPM Package Management**: Addressed missing `package.json` / `ENOENT` errors, restructuring the `frontend` subdirectory properly to run locally.
@@ -162,11 +200,29 @@ The project is a modern, Open Access educational website tailored for **Edexcel 
 - **Backend Connection Errors**: Debugged network 'Connection error' between frontend and backend by implementing permissive CORS settings for local development, adding X-Ray logging, and improving error handling in `backend/server.js`.
 
 ## 5. Next Steps
-- **Finish the Regression Suite (IMMEDIATE)**: Resolve the [5] Knowledge-search hang in the Playwright runner (investigate `waitForResponse` predicate / `Promise.all` ordering vs. the standalone `dbgsearch.mjs` which works), then get all 15 checks green (`cd frontend && npx playwright test --workers=1`). Fix any subsequent [6]/[A]/[B]/[D]/[7]–[10]/GOLDEN failures by reading `frontend/test-results/<test>/error-context.md`. Remove debug scripts (`frontend/dbglogin.mjs`, `frontend/dbgsearch.mjs`) once green.
-- **Frontend Asset Rendering**: Wire `resource_assets` into `HybridDocumentViewer`/`SearchPanel` so extracted graphs and plotting grids render inline (the `<img>` rendering gap noted in the forensic investigation).
-- **Tutor ↔ Search Unification**: Have the AI Tutor call `/api/search` (RAG) per question rather than the scoped `match_resource_chunks` retrieval, and generalize beyond the single Golden Dataset resource (`TARGET_RESOURCE_ID`).
-- **Backend Consolidation**: Unify Express (`server.js`) and FastAPI (`main.py`) behind one port / reverse proxy so the frontend only targets a single API origin.
-- **Re-embedding Hook**: Add a trigger to re-run `embedding_pipeline.py` when a `resources.content` row is updated outside `master_ingestion.py`.
-- **Interactive Resources**: Develop the dynamic PDF embed components and a toggle to switch between Question Papers and Mark Schemes per `specification_point`.
+### Immediate (Bug Fixes — Phase 1 from Forensic V2)
+- **Change default tab to 'Worksheet'**: `App.jsx:62` — `useState('Lesson')` → `useState('Worksheet')` to show worksheet content immediately instead of a placeholder (fixes BUG-1).
+- **Pre-fetch resource regardless of tab**: Remove the `activeTab === 'Worksheet'` guard from the resource fetch `useEffect` in `InteractiveTutor.jsx:74` so resources are pre-loaded on chapter mount (fixes BUG-4).
+- **Add spec-point selector UI**: Render `specPoints` as a dropdown/pill-list so students can switch between specification points instead of being locked to `data[0].id` (fixes BUG-2).
+
+### Short Term (Phase 2 — RAG & Sync)
+- **Pass `resource_id` to `/api/tutor`**: Add `resource_id` to the `TutorRequest` model in `main.py` and send it from `InteractiveTutor.jsx`. Remove `TARGET_RESOURCE_ID` constant so RAG retrieval matches the current chapter (fixes BUG-3).
+- **Extract backend URLs to env var**: Replace all hardcoded `http://localhost:8000` with `import.meta.env.VITE_BACKEND_URL` (fixes BUG-6).
+- **Finish the Regression Suite**: Resolve the check [5] Knowledge-search hang in the Playwright runner, then get all 15 checks green. Remove debug scripts (`dbglogin.mjs`, `dbgsearch.mjs`) once green.
+- **Add ESLint `react/jsx-no-undef` rule**: Prevent future unimported-JSX-identifier bugs (the systemic root cause of the `User` crash).
+
+### Medium Term (Phase 3 — Production Readiness)
+- **Migrate `/api/grade` to RAG**: Replace full-JSON context with `_retrieve_relevant_chunks()` — the last full-context-dump endpoint in the system.
+- **Populate `source_refs.page`** in the embedding pipeline so PDF page navigation (`#page=N`) works and citation chips show accurate page numbers.
+- **Lock down CORS**: Set `FRONTEND_URL` env var and restrict `allow_origins` from wildcard.
+- **Remove/archive Express `server.js`**: Port 5000 is dead code — FastAPI port 8000 has fully replaced it.
+- **Add rate limiting** on `/api/tutor` (e.g. `slowapi` for FastAPI).
+- **Add automated tests for RAG path**: `vitest` for frontend citation chips, `pytest` for backend retrieval pipeline.
+
+### Long Term
 - **Content Expansion**: Extend the ingestion pipeline across additional chapters and integrate interactive physics simulations into the VLE.
 - **Linked Question Population**: Backfill `resource_assets.linked_question_id` by cross-referencing the semantic JSON relationship map.
+- **Tutor ↔ Search Unification**: Have the AI Tutor call `/api/search` (RAG) per question rather than the scoped `match_resource_chunks` retrieval.
+- **Re-embedding Hook**: Add a trigger to re-run `embedding_pipeline.py` when `resources.content` is updated outside `master_ingestion.py`.
+- **Frontend Code-Splitting**: Reduce bundle from 1.1MB to <500KB via lazy-loading routes.
+- **Migrate `google.generativeai` → `google.genai`**: Silence the deprecation warning.
