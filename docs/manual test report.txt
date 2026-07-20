@@ -1,0 +1,69 @@
+ai tutor test with graphs :
+I’d be happy to help you interpret the graph you’re looking at. Since I can’t see the plotting grid myself, I need a little more information so I can guide you step by step.
+
+Could you describe what’s on the graph? For example:
+
+What is labelled on the x‑axis (horizontal) and y‑axis (vertical)?
+What shape or pattern does the line/curve have? (Straight line, curve, horizontal, sloping up/down?)
+Are there any numbers, points, or specific values you can read off?
+Once I know these details, I can help you understand what the graph represents and what it tells us about the motion.
+
+Hint from your learning materials: Graphs like this are often distance‑time or velocity‑time graphs [Source 1][Source 2]. The axes and the shape of the line will tell you which one it is, and then we can discuss what the slope (gradient) means.
+
+Take a look and tell me what you see!
+
+
+SRC-01
+· Distance vs. Time Graph
+
+SRC-02
+· Velocity-Time Graph
+
+SRC-03
+· Distance vs. Time Graph
+
+SRC-04
+· Velocity-Time Graph
+
+SRC-05
+· Scalar Quantity
+OPENCODE ZEN_DEEPSEEK_V4_FLASH_FREE
+help me answer
+
+I’d be glad to help you with the graph on page 2. Since I can’t see the page myself, I’ll guide you to look at the key features so we can work through it together.
+
+Let’s start with the basics:
+
+What are the axes?
+Look at the horizontal (x‑axis) and vertical (y‑axis) labels. Is it distance vs. time [Source 1] or velocity vs. time [Source 2]? (The axes tell us what kind of graph it is.)
+
+What’s the shape of the line?
+Is it a straight line, a curve, horizontal, or does it have sections?
+
+Are there any numbers or points marked?
+For example, specific times, distances, or grid intersections.
+
+Once you tell me these details, I can help you interpret what the graph shows (e.g., constant speed, acceleration, stationary periods) and answer any question that goes with it.
+
+If you have a specific question about the graph (like “find the speed” or “describe the motion”), just let me know that too. I’ll use Socratic questions to help you figure out the answer yourself step by step.
+
+
+SRC-01
+· Distance vs. Time Graph
+
+SRC-02
+· Velocity-Time Graph
+
+SRC-03
+· Distance vs. Time Graph
+
+SRC-04
+· Velocity-Time Graph
+
+SRC-05
+· Speed
+OPENCODE ZEN_DEEPSEEK_V4_FLASH_FREE
+==================================
+
+
+The first note is regarding the specification points. It's still there as a drop-down menu, so the agent went through the implementation before we came up with the block design.The second note is the citation for the student. It went through, but it has too many details. I want you to remove the following: - the type - similarity - the chunk ID from version or student mode Instead, just cancel it out, remove it, or switch it to the developer mode instead 
