@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { authenticatedFetch } from '../lib/apiClient';
 import { Send, Lightbulb, CheckCircle, AlertTriangle, Bot, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -22,7 +23,7 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
   useEffect(() => {
     const fetchQuestion = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/question?resource_id=${resourceId || ''}`);
+        const response = await authenticatedFetch(`${API_BASE}/api/question?resource_id=${resourceId || ''}`);
         if (response.ok) {
           const data = await response.json();
           setQuestionIndex(data.question_index);
@@ -52,7 +53,10 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
     try {
       // Get current user session
       const { data: { session } } = await supabase.auth.getSession();
-      const studentId = session?.user?.id || '00000000-0000-0000-0000-000000000000'; // Fallback if not logged in
+      if (!session?.user?.id) {
+        throw new Error('An authenticated student session is required for grading.');
+      }
+      const studentId = session.user.id;
       
       const payload = {
         student_id: studentId,
@@ -63,9 +67,8 @@ const QuizEngine = ({ resourceId, activeSpecPointId }) => {
         question_text: questionText
       };
 
-      const response = await fetch(`${API_BASE}/api/grade`, {
+      const response = await authenticatedFetch(`${API_BASE}/api/grade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       

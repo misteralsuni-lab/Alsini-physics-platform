@@ -1,7 +1,8 @@
 import os
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -15,14 +16,20 @@ load_dotenv()
 # Initialize FastAPI
 app = FastAPI(title="Alsini Physics VLE - AI Tutor API", version="1.0")
 
-# Configure CORS for React frontend
+# Configure CORS for the known frontend origins. The API carries privileged
+# server-side credentials, so wildcard origins are intentionally not allowed.
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+configured_origins = os.getenv(
+    "CORS_ORIGINS",
+    ",".join([frontend_url, "http://localhost:5174", "http://localhost:3000"]),
+)
+allowed_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url, "http://localhost:5174", "http://localhost:3000", "*"],  # Permissive for dev, lock down in prod
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Environment Variables
@@ -31,6 +38,42 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 OPENCODE_ZEN_API_KEY = os.getenv("OPENCODE_ZEN_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+# The browser must present a Supabase access token before any /api route can
+# use the service-role-backed data and LLM clients. Token validation is
+# delegated to Supabase Auth so this remains compatible with projects using
+# either legacy or asymmetric JWT signing keys.
+bearer_scheme = HTTPBearer(auto_error=True)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> dict:
+    """Validate the caller's Supabase access token and return its user."""
+    if not SUPABASE_URL or not (SUPABASE_ANON_KEY or SUPABASE_KEY):
+        raise HTTPException(status_code=503, detail="Authentication service is not configured.")
+
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "apikey": SUPABASE_ANON_KEY or SUPABASE_KEY,
+                "Authorization": f"Bearer {credentials.credentials}",
+            },
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail="Authentication service is unavailable.") from exc
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="A valid Supabase access token is required.")
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Authentication service returned an invalid user.") from exc
+
 
 # Initialize APIs
 if GEMINI_API_KEY:
@@ -105,6 +148,11 @@ class TutorSource(BaseModel):
     specification_point_id: Optional[str] = None
     specification_point_ref: Optional[str] = None
     chunk_index: Optional[int] = None
+    # Focused visual-asset provenance. These fields are populated only for
+    # the verified synthetic asset source and let the UI use one identity.
+    asset_id: Optional[str] = None
+    asset_url: Optional[str] = None
+    asset_label: Optional[str] = None
 
 class TutorResponse(BaseModel):
     response: str
@@ -242,6 +290,9 @@ def _chunks_to_sources(chunks: list[dict]) -> list[TutorSource]:
                 or (c.get("source_refs") or {}).get("spec_point")
             ),
             chunk_index=c.get("chunk_index"),
+            asset_id=c.get("asset_id"),
+            asset_url=c.get("asset_url"),
+            asset_label=c.get("asset_label"),
         )
         for c in chunks
     ]
@@ -294,57 +345,84 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         grounded.append(c)
 
     # 1. Fetch the asset itself so we can read its caption / linked question.
-    asset_endpoint = (
-        f"{SUPABASE_URL}/rest/v1/resource_assets"
-        f"?id=eq.{learning_context.focused_asset}"
-        f"&select=id,page_number,asset_type,caption,linked_question_id,metadata"
-    )
+    asset_endpoint = f"{SUPABASE_URL}/rest/v1/resource_assets"
     asset_caption: Optional[str] = None
     linked_question_id: Optional[str] = None
     asset_type: Optional[str] = learning_context.focused_asset_type
+    asset_url: Optional[str] = None
+    asset_id: Optional[str] = None
     try:
-        ar = requests.get(asset_endpoint, headers=headers, timeout=10)
-        if ar.status_code == 200 and ar.json():
-            a = ar.json()[0]
-            asset_caption = a.get("caption")
-            linked_question_id = a.get("linked_question_id")
-            if not asset_type:
-                asset_type = a.get("asset_type")
-            if page is None:
-                page = a.get("page_number")
-    except requests.RequestException:
-        pass  # non-fatal
+        ar = requests.get(
+            asset_endpoint,
+            headers=headers,
+            params={
+                "id": f"eq.{learning_context.focused_asset}",
+                # The asset and selected worksheet must belong to the same
+                # resource before either can enter tutor context.
+                "resource_id": f"eq.{resource_id}",
+                "select": "id,resource_id,page_number,asset_type,storage_url,caption,linked_question_id,metadata",
+                "limit": "1",
+            },
+            timeout=10,
+        )
+        if ar.status_code != 200:
+            raise HTTPException(status_code=502, detail="Unable to verify the focused asset.")
+        rows = ar.json()
+        if not rows:
+            raise HTTPException(
+                status_code=400,
+                detail="The focused asset does not belong to the selected resource.",
+            )
+        a = rows[0]
+        asset_id = a.get("id")
+        asset_url = a.get("storage_url")
+        asset_caption = a.get("caption")
+        linked_question_id = a.get("linked_question_id")
+        # Never trust client-supplied type/page when the asset row is known.
+        asset_type = a.get("asset_type") or asset_type
+        page = a.get("page_number") if a.get("page_number") is not None else page
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail="Asset verification service is unavailable.") from exc
 
     # 2. On-page chunks — the reading-order text that surrounds the asset.
     if page is not None:
-        page_endpoint = (
-            f"{SUPABASE_URL}/rest/v1/resource_chunks"
-            f"?resource_id=eq.{resource_id}"
-            f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
-            f"&limit=5"
-        )
+        page_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
         try:
-            pr = requests.get(page_endpoint, headers=headers, timeout=12)
+            pr = requests.get(
+                page_endpoint,
+                headers=headers,
+                params={
+                    "resource_id": f"eq.{resource_id}",
+                    "source_refs->>page": f"eq.{page}",
+                    "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+                    "order": "chunk_index.asc",
+                    "limit": "50",
+                },
+                timeout=12,
+            )
             if pr.status_code == 200:
                 for c in pr.json():
-                    sr = c.get("source_refs") or {}
-                    if sr.get("page") == page:
-                        c.setdefault("resource_id", resource_id)
-                        _append_chunk(c)
-        except requests.RequestException:
-            pass
+                    c.setdefault("resource_id", resource_id)
+                    _append_chunk(c)
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=503, detail="Page grounding service is unavailable.") from exc
 
     # 3. Linked worksheet question chunk (asset → question id → chunk).
     if linked_question_id:
         qid = linked_question_id.strip()
-        q_endpoint = (
-            f"{SUPABASE_URL}/rest/v1/resource_chunks"
-            f"?resource_id=eq.{resource_id}&chunk_type=eq.question"
-            f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
-            f"&limit=20"
-        )
+        q_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
         try:
-            qr = requests.get(q_endpoint, headers=headers, timeout=12)
+            qr = requests.get(
+                q_endpoint,
+                headers=headers,
+                params={
+                    "resource_id": f"eq.{resource_id}",
+                    "chunk_type": "eq.question",
+                    "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+                    "limit": "20",
+                },
+                timeout=12,
+            )
             if qr.status_code == 200:
                 for c in qr.json():
                     sr = c.get("source_refs") or {}
@@ -359,14 +437,19 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
     #    We pull formula chunks for the same resource; the tutor's
     #    system prompt stresses figure+equation reasoning.
     if asset_type and "graph" in (asset_type or "").lower():
-        eq_endpoint = (
-            f"{SUPABASE_URL}/rest/v1/resource_chunks"
-            f"?resource_id=eq.{resource_id}&chunk_type=eq.formula"
-            f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
-            f"&limit=3"
-        )
+        eq_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
         try:
-            er = requests.get(eq_endpoint, headers=headers, timeout=12)
+            er = requests.get(
+                eq_endpoint,
+                headers=headers,
+                params={
+                    "resource_id": f"eq.{resource_id}",
+                    "chunk_type": "eq.formula",
+                    "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+                    "limit": "3",
+                },
+                timeout=12,
+            )
             if er.status_code == 200:
                 for c in er.json():
                     c.setdefault("resource_id", resource_id)
@@ -386,6 +469,9 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
             "chunk_type": "figure",
             "source_refs": {"page": page, "concept": "focused asset"},
             "similarity": None,
+            "asset_id": asset_id,
+            "asset_url": asset_url,
+            "asset_label": learning_context.focused_asset_label,
         })
 
     return grounded
@@ -546,7 +632,10 @@ def _call_nvidia(messages: list, system_prompt: str) -> tuple[str, str]:
     return content, "NVIDIA_NEMOTRON_3_SUPER_120B"
 
 @app.post("/api/tutor", response_model=TutorResponse)
-async def tutor_endpoint(request: TutorRequest):
+async def tutor_endpoint(
+    request: TutorRequest,
+    _user: dict = Depends(get_current_user),
+):
     if not request.student_prompt:
         raise HTTPException(status_code=400, detail="student_prompt is required.")
 
@@ -554,10 +643,20 @@ async def tutor_endpoint(request: TutorRequest):
     # either the new structured `learning_context` object (preferred),
     # or the legacy bare `resource_id` field (backward compatibility).
     ctx = request.learning_context
+    if ctx and ctx.resource_id and request.resource_id and ctx.resource_id != request.resource_id:
+        raise HTTPException(
+            status_code=400,
+            detail="resource_id conflicts with learning_context.resource_id.",
+        )
     effective_resource_id = (
         (ctx.resource_id if ctx and ctx.resource_id else None)
         or request.resource_id
     )
+    if ctx and ctx.focused_asset and not effective_resource_id:
+        raise HTTPException(status_code=400, detail="A focused asset requires a resource_id.")
+    if ctx and effective_resource_id and not ctx.resource_id:
+        # Keep the legacy top-level field compatible with asset grounding.
+        ctx.resource_id = effective_resource_id
 
     # --- RAG Retrieval ---
     # Replace the old full-JSON dump with targeted hybrid retrieval.
@@ -661,6 +760,13 @@ async def tutor_endpoint(request: TutorRequest):
             "\n"
             + rag_context + "\n"
         )
+    else:
+        system_prompt += (
+            "\nNo verified curriculum context was retrieved for this request. "
+            "Do not present remembered or inferred curriculum facts as verified. "
+            "Be explicit that the answer could not be grounded and ask the student "
+            "for a narrower question or suggest retrying when the worksheet context is available.\n"
+        )
 
     if route_target == "OPENCODE_ZEN":
         # Route to OpenCode Zen (primary) with NVIDIA fallback
@@ -740,7 +846,10 @@ def _supabase_headers() -> dict:
 
 
 @app.get("/api/resources/{resource_id}/assets")
-async def get_resource_assets(resource_id: str):
+async def get_resource_assets(
+    resource_id: str,
+    _user: dict = Depends(get_current_user),
+):
     """
     List all visual assets registered for a given resource.
 
@@ -770,7 +879,11 @@ async def get_resource_assets(resource_id: str):
 
 
 @app.get("/api/resources/{resource_id}/assets/{asset_type}")
-async def get_resource_assets_by_type(resource_id: str, asset_type: str):
+async def get_resource_assets_by_type(
+    resource_id: str,
+    asset_type: str,
+    _user: dict = Depends(get_current_user),
+):
     """
     List visual assets of a specific type for a resource
     (e.g. /api/resources/{id}/assets/graph).
@@ -843,7 +956,10 @@ class HybridSearchRequest(BaseModel):
 
 
 @app.post("/api/search")
-async def semantic_search(request: SearchRequest):
+async def semantic_search(
+    request: SearchRequest,
+    _user: dict = Depends(get_current_user),
+):
     """
     Pure vector (semantic) search over resource_chunks.
 
@@ -893,7 +1009,10 @@ async def semantic_search(request: SearchRequest):
 
 
 @app.post("/api/search/hybrid")
-async def hybrid_search(request: HybridSearchRequest):
+async def hybrid_search(
+    request: HybridSearchRequest,
+    _user: dict = Depends(get_current_user),
+):
     """
     Combined relational + vector (semantic) search.
 
@@ -937,22 +1056,37 @@ async def hybrid_search(request: HybridSearchRequest):
                 detail=f"Vector search RPC failed ({rpc_resp.status_code}): {rpc_resp.text[:200]}",
             )
         vector_results = rpc_resp.json()
+        if request.chunk_type:
+            # The existing RPC supports resource scoping but not chunk type;
+            # enforce the UI's selected type before merging vector results.
+            vector_results = [
+                result for result in vector_results
+                if result.get("chunk_type") == request.chunk_type
+            ]
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"Network error reaching Supabase (vector): {exc}")
 
     # --- 2. Relational search (optional filters) ---
     relational_results: list[dict] = []
 
-    # If we have chunk_type filter, fetch matching chunks relationally
-    if request.chunk_type and not request.resource_id:
+    # If we have a chunk_type filter, fetch matching chunks relationally.
+    # Apply resource scope here too; otherwise the UI filter is silently
+    # ignored for the normal worksheet-scoped search.
+    if request.chunk_type:
         try:
-            rel_endpoint = (
-                f"{SUPABASE_URL}/rest/v1/resource_chunks"
-                f"?chunk_type=eq.{request.chunk_type}"
-                f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
-                f"&limit={request.match_count * 2}"
+            rel_params = {
+                "chunk_type": f"eq.{request.chunk_type}",
+                "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+                "limit": str(request.match_count * 2),
+            }
+            if request.resource_id:
+                rel_params["resource_id"] = f"eq.{request.resource_id}"
+            rel_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/resource_chunks",
+                headers=headers,
+                params=rel_params,
+                timeout=15,
             )
-            rel_resp = requests.get(rel_endpoint, headers=headers, timeout=15)
             if rel_resp.status_code == 200:
                 relational_results = rel_resp.json()
         except requests.RequestException:
@@ -975,8 +1109,9 @@ async def hybrid_search(request: HybridSearchRequest):
                     chunk_endpoint = (
                         f"{SUPABASE_URL}/rest/v1/resource_chunks"
                         f"?resource_id=in.({id_filter})"
-                        f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
-                        f"&limit={request.match_count * 2}"
+                        + (f"&chunk_type=eq.{request.chunk_type}" if request.chunk_type else "")
+                        + f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
+                        + f"&limit={request.match_count * 2}"
                     )
                     chunk_resp = requests.get(chunk_endpoint, headers=headers, timeout=15)
                     if chunk_resp.status_code == 200:
@@ -1033,7 +1168,10 @@ async def hybrid_search(request: HybridSearchRequest):
 
 
 @app.get("/api/question")
-async def get_question(resource_id: Optional[str] = None):
+async def get_question(
+    resource_id: Optional[str] = None,
+    _user: dict = Depends(get_current_user),
+):
     # This simulates fetching a question and its examiner report hint from OpenKB
     # based on the resource_id.
     return {
@@ -1044,7 +1182,10 @@ async def get_question(resource_id: Optional[str] = None):
     }
 
 @app.post("/api/grade", response_model=GradeResponse)
-async def grade_endpoint(request: GradeRequest):
+async def grade_endpoint(
+    request: GradeRequest,
+    _user: dict = Depends(get_current_user),
+):
     context_data = fetch_forces_and_motion_data()
     
     system_prompt = (

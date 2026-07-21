@@ -62,13 +62,14 @@ async function openTutor(page) {
   await expect(page.getByPlaceholder('Ask your tutor a question...')).toBeVisible();
 }
 
-// Send a message and resolve with the /api/tutor response body + captured prompt.
+// Send a message and resolve with the /api/tutor response body + captured
+// request so the structured LearningContext contract is verified directly.
 async function askTutor(page, text) {
-  let capturedPrompt = null;
+  let capturedRequest = null;
   const onRequest = (req) => {
     if (req.url().includes('/api/tutor') && req.method() === 'POST') {
       try {
-        capturedPrompt = req.postDataJSON().student_prompt;
+        capturedRequest = req.postDataJSON();
       } catch {
         /* ignore */
       }
@@ -82,12 +83,16 @@ async function askTutor(page, text) {
       { timeout: 60_000 }
     ),
     page.getByPlaceholder('Ask your tutor a question...').fill(text),
-    page.getByRole('button', { name: 'Ask your tutor a question...' }).click(),
+    page.getByRole('button', { name: 'Send question to tutor' }).click(),
   ]);
 
   const body = await response.json();
   page.off('request', onRequest);
-  return { body, capturedPrompt };
+  return {
+    body,
+    capturedPrompt: capturedRequest?.student_prompt,
+    capturedRequest,
+  };
 }
 
 test.beforeEach(async ({ page }) => {
@@ -201,7 +206,7 @@ test('[6] Clicking a search result updates focus (context chip)', async ({ page 
   // Click the top result -> onNavigate sets focus -> context chip appears.
   await page.locator('button', { hasText: /%/ }).first().click();
 
-  const chip = page.getByText(/Concept:/i).or(page.getByText(/Context/i)).first();
+  const chip = page.getByText(/Viewing/i).or(page.getByText(/Concept:/i)).first();
   await expect(chip).toBeVisible({ timeout: 10_000 });
 });
 
@@ -238,10 +243,12 @@ test('[B] Clicking the graph injects graph context into the next prompt', async 
   await expect(graphCard).toBeVisible({ timeout: 15_000 });
   await graphCard.click();
 
-  await expect(page.getByText(/Asset:/i)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/Viewing/i)).toBeVisible({ timeout: 10_000 });
 
-  const { capturedPrompt } = await askTutor(page, 'What does it show?');
-  expect(capturedPrompt).toMatch(/graph/i);
+  const { capturedRequest } = await askTutor(page, 'What does it show?');
+  expect(capturedRequest.learning_context.focused_asset).toBeTruthy();
+  expect(capturedRequest.learning_context.focused_asset_type).toMatch(/graph|figure/i);
+  expect(capturedRequest.learning_context.focused_asset_label).toMatch(/^FIG-/);
 });
 
 // ---------------------------------------------------------------------------
@@ -253,14 +260,15 @@ test('[D] Tutor grounds "Explain this graph" in the focused graph', async ({ pag
 
   const graphCard = page.locator(`img[src*="${GRAPH_ASSET}"]`).first();
   await graphCard.click();
-  await expect(page.getByText(/Asset:/i)).toBeVisible();
+  await expect(page.getByText(/Viewing/i)).toBeVisible();
 
-  const { body, capturedPrompt } = await askTutor(page, 'Explain this graph.');
-  expect(capturedPrompt).toMatch(/graph/i);
+  const { body, capturedRequest } = await askTutor(page, 'Explain this graph.');
+  expect(capturedRequest.learning_context.focused_asset).toBeTruthy();
+  expect(capturedRequest.learning_context.focused_asset_label).toMatch(/^FIG-/);
   expect(body.sources.length).toBeGreaterThan(0);
-  // The model should cite a source in its prose.
+  // The UI must expose the grounded source as an expandable citation chip.
   const lastMsg = page.locator('.space-y-6 > div').last();
-  await expect(lastMsg).toContainText(/\[Source/i, { timeout: 15_000 });
+  await expect(lastMsg.getByRole('button', { name: /Citation/i }).first()).toBeVisible({ timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------------------
@@ -277,7 +285,7 @@ test('[7] Tutor returns RAG citations for "Explain the graph"', async ({ page })
 
   // The UI renders citation chips under the latest AI message.
   const lastMsg = page.locator('.space-y-6 > div').last();
-  await expect(lastMsg).toContainText(/\[Source/i, { timeout: 15_000 });
+  await expect(lastMsg.getByRole('button', { name: /Citation/i }).first()).toBeVisible({ timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------------------

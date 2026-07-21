@@ -22,6 +22,23 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } }
 };
 
+const ASSET_TYPE_PREFIX = {
+  figure: 'FIG', graph: 'FIG', plot: 'FIG',
+  table: 'TAB', plotting_grid: 'TAB',
+  equation: 'EQ', formula: 'EQ',
+};
+
+function assetCitationLabel(asset, assetIndex) {
+  const prefix = ASSET_TYPE_PREFIX[asset.asset_type] || 'FIG';
+  const page = asset.page_number;
+  if (page != null) {
+    const pageLetter = String.fromCharCode(65 + ((page - 1) % 26));
+    const idx = String(assetIndex + 1).padStart(2, '0');
+    return `${prefix}-${pageLetter}${idx}`;
+  }
+  return `${prefix}-${String(assetIndex + 1).padStart(2, '0')}`;
+}
+
 // --- Visual Asset Card ---
 const AssetCard = ({ asset, onZoom, onFocus, assetIndex = 0 }) => {
   const [isLoaded, setIsLoaded] = useState(false);
@@ -35,24 +52,9 @@ const AssetCard = ({ asset, onZoom, onFocus, assetIndex = 0 }) => {
   };
 
   // Compact citation label for this asset (FIG-04 / TAB-02 / EQ-03).
-  // Mirrors the backend CHUNK_TYPE_PREFIX map so the label the student
-  // sees on the focus chip matches the citation chips under the tutor's
-  // reply. See GRAPH_CONTEXT_SYNCHRONIZATION.md.
-  const _ASSET_PREFIX = {
-    figure: 'FIG', graph: 'FIG', plot: 'FIG',
-    table: 'TAB', plotting_grid: 'TAB',
-    equation: 'EQ', formula: 'EQ',
-  };
-  const _assetLabel = (() => {
-    const prefix = _ASSET_PREFIX[asset.asset_type] || 'FIG';
-    const page = asset.page_number;
-    if (page != null) {
-      const pageLetter = String.fromCharCode(65 + ((page - 1) % 26));
-      const idx = String(assetIndex + 1).padStart(2, '0');
-      return `${prefix}-${pageLetter}${idx}`;
-    }
-    return `${prefix}-${String(assetIndex + 1).padStart(2, '0')}`;
-  })();
+  // The same helper is used by both viewer modes so focus labels remain
+  // consistent when the student switches between document and graph views.
+  const _assetLabel = assetCitationLabel(asset, assetIndex);
 
   return (
     <motion.div
@@ -511,10 +513,19 @@ const HybridDocumentViewer = ({ resourceId, focus, onFocus, conceptCardRefs }) =
                       </h4>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {assets.map((asset) => (
+                      {assets.map((asset, assetIndex) => (
                         <button
                           key={asset.id}
-                          onClick={() => setZoomAsset(asset)}
+                          onClick={() => {
+                            if (onFocus) onFocus({
+                              type: 'asset',
+                              asset_id: asset.id,
+                              asset_type: asset.asset_type,
+                              page: asset.page_number,
+                              asset_label: assetCitationLabel(asset, assetIndex),
+                            });
+                            setZoomAsset(asset);
+                          }}
                           className="group relative rounded-xl border border-white/10 bg-[#0A0A0A]/60 overflow-hidden hover:border-emerald-500/40 transition-all"
                         >
                           <div className="aspect-video flex items-center justify-center bg-white/95">

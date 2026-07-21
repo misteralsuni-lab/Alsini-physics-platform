@@ -1,10 +1,12 @@
 import { test as setup, expect } from '@playwright/test';
 
-// One-time authentication for the golden regression suite.
-// Credentials resolve from env vars (CI) and fall back to the dedicated
-// E2E test account that is provisioned in the Supabase project.
-const EMAIL = process.env.E2E_EMAIL || 'e2e_test@alsini.dev';
-const PASSWORD = process.env.E2E_PASSWORD || 'E2Etest1234';
+// One-time authentication for the golden regression suite. Credentials must
+// be supplied by the runner; never commit or silently use a reusable account.
+const EMAIL = process.env.E2E_EMAIL;
+const PASSWORD = process.env.E2E_PASSWORD;
+if (!EMAIL || !PASSWORD) {
+  throw new Error('E2E_EMAIL and E2E_PASSWORD must be provided to run Playwright tests.');
+}
 const AUTH_FILE = 'playwright/.auth/user.json';
 
 setup('authenticate test account', async ({ page }) => {
