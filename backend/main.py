@@ -51,13 +51,47 @@ class Message(BaseModel):
     role: str
     content: str
 
+# --- Learning Context -------------------------------------------------
+# Generic learning-context carrier passed from whichever surface the
+# student is viewing (worksheet, lesson, practical, quiz). This keeps
+# the tutor API stable as new surfaces come online in Session 4B and
+# beyond — each surface populates the fields it knows about, the rest
+# stay null.
+#
+# Spec alignment:
+#   - PEDAGOGICAL_ARCHITECTURE.md §Curriculum Hierarchy — Unit → Chapter
+#     → Lesson → Block → Worksheet → Practical → Quiz.
+#   - SYSTEM_ARCHITECTURE.md §7 — Focus state as single source of truth.
+class LearningContext(BaseModel):
+    resource_id: Optional[str] = None
+    chapter_id: Optional[str] = None
+    lesson_id: Optional[str] = None
+    block_id: Optional[str] = None
+    worksheet_id: Optional[str] = None
+    focused_chunk: Optional[str] = None
+    focused_asset: Optional[str] = None
+    # Human-readable asset label when the student is viewing a graph /
+    # figure / table / diagram / equation asset (e.g. "FIG-04"). When
+    # present the tutor must acknowledge the visible asset and guide
+    # from it rather than asking the student to describe it.
+    focused_asset_label: Optional[str] = None
+    focused_asset_type: Optional[str] = None
+    focused_question: Optional[str] = None
+    page: Optional[int] = None
+
 class TutorRequest(BaseModel):
     student_prompt: str
     history: Optional[List[Message]] = []
     # Dynamic RAG scope — the frontend passes the currently selected
     # worksheet's resource_id so retrieval is scoped to it. If absent,
     # retrieval runs unscoped (returns chunks across all resources).
+    # NOTE: superseded by `learning_context.resource_id` when present.
+    # Kept for backward compatibility with older frontends that have
+    # not migrated to the LearningContext object yet.
     resource_id: Optional[str] = None
+    # Structured learning context — the single carrier for everything
+    # the tutor should know about what the student is currently viewing.
+    learning_context: Optional[LearningContext] = None
 
 class TutorSource(BaseModel):
     chunk_id: str
@@ -67,7 +101,9 @@ class TutorSource(BaseModel):
     similarity: Optional[float] = None
     # Traceability fields — exposed for developer-mode citation expansion.
     resource_id: Optional[str] = None
+    resource_title: Optional[str] = None
     specification_point_id: Optional[str] = None
+    specification_point_ref: Optional[str] = None
     chunk_index: Optional[int] = None
 
 class TutorResponse(BaseModel):
@@ -199,11 +235,238 @@ def _chunks_to_sources(chunks: list[dict]) -> list[TutorSource]:
             similarity=c.get("similarity"),
             # Traceability fields for developer-mode citation expansion.
             resource_id=c.get("resource_id"),
+            resource_title=c.get("resource_title"),
             specification_point_id=c.get("specification_point_id"),
+            specification_point_ref=(
+                c.get("specification_point_ref")
+                or (c.get("source_refs") or {}).get("spec_point")
+            ),
             chunk_index=c.get("chunk_index"),
         )
         for c in chunks
     ]
+
+
+# -------------------------------------------------------------------
+# Asset Grounding (Session 4A.1 — Task 5)
+# -------------------------------------------------------------------
+# When the student has focused a visual asset (graph / figure / table /
+# diagram / equation), we retrieve all connected educational objects
+# so the tutor has the full surrounding context:
+#   - the asset itself (caption, type, page, linked question id)
+#   - chunks on the same page (so the tutor can read the on-page text
+#     the asset sits next to)
+#   - chunks mentioning the same concept (if the asset's metadata or
+#     the reading-order chunks expose one)
+#   - linked worksheet question chunk (resource_assets.linked_question_id
+#     → resource_chunks.source_refs.question_id)
+# Reuses the existing Supabase PostgREST path — no new RPC, no new
+# schema. Non-fatal: any failure returns an empty list so the tutor
+# still answers from general RAG retrieval.
+def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
+    """
+    Retrieve connected educational objects for a focused visual asset.
+
+    Returns a list of chunk-shaped dicts (compatible with the existing
+    `_format_chunks_as_context` formatter) covering the asset's
+    on-page text, linked question, and concept neighbours.
+    """
+    if not learning_context or not learning_context.focused_asset:
+        return []
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+
+    resource_id = learning_context.resource_id
+    page = learning_context.page
+    if not resource_id:
+        return []
+
+    headers = _supabase_headers()
+    grounded: list[dict] = []
+    seen_chunk_ids: set[str] = set()
+
+    def _append_chunk(c: dict) -> None:
+        cid = c.get("id")
+        if cid and cid in seen_chunk_ids:
+            return
+        if cid:
+            seen_chunk_ids.add(cid)
+        grounded.append(c)
+
+    # 1. Fetch the asset itself so we can read its caption / linked question.
+    asset_endpoint = (
+        f"{SUPABASE_URL}/rest/v1/resource_assets"
+        f"?id=eq.{learning_context.focused_asset}"
+        f"&select=id,page_number,asset_type,caption,linked_question_id,metadata"
+    )
+    asset_caption: Optional[str] = None
+    linked_question_id: Optional[str] = None
+    asset_type: Optional[str] = learning_context.focused_asset_type
+    try:
+        ar = requests.get(asset_endpoint, headers=headers, timeout=10)
+        if ar.status_code == 200 and ar.json():
+            a = ar.json()[0]
+            asset_caption = a.get("caption")
+            linked_question_id = a.get("linked_question_id")
+            if not asset_type:
+                asset_type = a.get("asset_type")
+            if page is None:
+                page = a.get("page_number")
+    except requests.RequestException:
+        pass  # non-fatal
+
+    # 2. On-page chunks — the reading-order text that surrounds the asset.
+    if page is not None:
+        page_endpoint = (
+            f"{SUPABASE_URL}/rest/v1/resource_chunks"
+            f"?resource_id=eq.{resource_id}"
+            f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
+            f"&limit=5"
+        )
+        try:
+            pr = requests.get(page_endpoint, headers=headers, timeout=12)
+            if pr.status_code == 200:
+                for c in pr.json():
+                    sr = c.get("source_refs") or {}
+                    if sr.get("page") == page:
+                        c.setdefault("resource_id", resource_id)
+                        _append_chunk(c)
+        except requests.RequestException:
+            pass
+
+    # 3. Linked worksheet question chunk (asset → question id → chunk).
+    if linked_question_id:
+        qid = linked_question_id.strip()
+        q_endpoint = (
+            f"{SUPABASE_URL}/rest/v1/resource_chunks"
+            f"?resource_id=eq.{resource_id}&chunk_type=eq.question"
+            f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
+            f"&limit=20"
+        )
+        try:
+            qr = requests.get(q_endpoint, headers=headers, timeout=12)
+            if qr.status_code == 200:
+                for c in qr.json():
+                    sr = c.get("source_refs") or {}
+                    if str(sr.get("question_id", "")).strip() == qid:
+                        c.setdefault("resource_id", resource_id)
+                        _append_chunk(c)
+        except requests.RequestException:
+            pass
+
+    # 4. Linked equation / formula chunks — when the asset is a graph,
+    #    the governing equation is the most pedagogically valuable link.
+    #    We pull formula chunks for the same resource; the tutor's
+    #    system prompt stresses figure+equation reasoning.
+    if asset_type and "graph" in (asset_type or "").lower():
+        eq_endpoint = (
+            f"{SUPABASE_URL}/rest/v1/resource_chunks"
+            f"?resource_id=eq.{resource_id}&chunk_type=eq.formula"
+            f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
+            f"&limit=3"
+        )
+        try:
+            er = requests.get(eq_endpoint, headers=headers, timeout=12)
+            if er.status_code == 200:
+                for c in er.json():
+                    c.setdefault("resource_id", resource_id)
+                    _append_chunk(c)
+        except requests.RequestException:
+            pass
+
+    # 5. Synthetic "asset" pseudo-chunk — lets the formatter surface the
+    #    caption as a citation-friendly block. Tagged as a figure chunk so
+    #    it picks up the FIG- prefix in the citation label.
+    if asset_caption or asset_type:
+        grounded.insert(0, {
+            "id": f"asset:{learning_context.focused_asset}",
+            "resource_id": resource_id,
+            "chunk_index": -1,
+            "chunk_text": asset_caption or f"{asset_type or 'asset'} on page {page}",
+            "chunk_type": "figure",
+            "source_refs": {"page": page, "concept": "focused asset"},
+            "similarity": None,
+        })
+
+    return grounded
+
+
+def _enrich_chunks_with_resource_meta(chunks: list[dict], resource_id: Optional[str]) -> None:
+    """
+    Attach `resource_title`, `specification_point_id`, and
+    `specification_point_ref` to each chunk in-place, so student-mode
+    citations can show "Resource title · p.N · spec ref" without a
+    second round-trip on the frontend, and developer mode still exposes
+    the full traceability required by RAG_ARCHITECTURE.md §Traceability.
+
+    Reuses the existing PostgREST path. Non-fatal: any failure leaves
+    the chunks unchanged (the tutor still answers from RAG retrieval).
+    """
+    if not chunks or not SUPABASE_URL or not SUPABASE_KEY:
+        return
+
+    headers = None
+    title: Optional[str] = None
+    spec_by_id: dict[str, tuple[str, str]] = {}
+
+    try:
+        headers = _supabase_headers()
+    except HTTPException:
+        return  # Supabase not configured — non-fatal
+
+    # 1. Resolve the resource title — single GET.
+    if resource_id:
+        try:
+            r_ep = (
+                f"{SUPABASE_URL}/rest/v1/resources"
+                f"?id=eq.{resource_id}&select=id,title,specification_point_id"
+            )
+            r_resp = requests.get(r_ep, headers=headers, timeout=10)
+            if r_resp.status_code == 200 and r_resp.json():
+                row = r_resp.json()[0]
+                title = row.get("title")
+                spec_pt_id = row.get("specification_point_id")
+                # Pre-populate the spec cache if the resource carries one.
+                if spec_pt_id:
+                    spec_by_id.setdefault(spec_pt_id, (spec_pt_id, ""))
+        except requests.RequestException:
+            pass
+
+    # 2. Resolve specification-point references (reference_code + description)
+    #    for every spec id mentioned in chunk source_refs. Single batched GET.
+    spec_ids_to_resolve: set[str] = set()
+    for c in chunks:
+        sid = c.get("specification_point_id") or (c.get("source_refs") or {}).get("spec_point_id")
+        if sid:
+            spec_ids_to_resolve.add(str(sid))
+    if spec_ids_to_resolve:
+        id_filter = ",".join(sorted(spec_ids_to_resolve))
+        sp_ep = (
+            f"{SUPABASE_URL}/rest/v1/specification_points"
+            f"?id=in.({id_filter})&select=id,reference_code,description"
+        )
+        try:
+            sp_resp = requests.get(sp_ep, headers=headers, timeout=10)
+            if sp_resp.status_code == 200:
+                for row in sp_resp.json():
+                    rid = str(row.get("id"))
+                    ref = row.get("reference_code") or ""
+                    desc = row.get("description") or ""
+                    spec_by_id[rid] = (rid, f"{ref}: {desc}" if ref or desc else ref or desc)
+        except requests.RequestException:
+            pass
+
+    # 3. Attach the resolved metadata back onto each chunk.
+    for c in chunks:
+        if title and not c.get("resource_title"):
+            c["resource_title"] = title
+        sid = c.get("specification_point_id") or (c.get("source_refs") or {}).get("spec_point_id")
+        if sid and str(sid) in spec_by_id:
+            _, ref = spec_by_id[str(sid)]
+            c.setdefault("specification_point_id", str(sid))
+            if ref and not c.get("specification_point_ref"):
+                # Carry it on the chunk for _chunks_to_sources to pick up.
+                (c.setdefault("source_refs", {}))["spec_point"] = ref
 
 
 # ===== retained for /api/grade compatibility (still dumps full JSON) =====
@@ -287,30 +550,107 @@ async def tutor_endpoint(request: TutorRequest):
     if not request.student_prompt:
         raise HTTPException(status_code=400, detail="student_prompt is required.")
 
+    # Resolve the effective learning context. The frontend may send
+    # either the new structured `learning_context` object (preferred),
+    # or the legacy bare `resource_id` field (backward compatibility).
+    ctx = request.learning_context
+    effective_resource_id = (
+        (ctx.resource_id if ctx and ctx.resource_id else None)
+        or request.resource_id
+    )
+
     # --- RAG Retrieval ---
     # Replace the old full-JSON dump with targeted hybrid retrieval.
-    # Dynamic scope: pass the frontend-supplied resource_id so the
-    # tutor grounds its answer in the CURRENTLY SELECTED worksheet,
-    # not a hardcoded resource.
+    # Dynamic scope: pass the effective resource_id so the tutor
+    # grounds its answer in the CURRENTLY SELECTED worksheet, not a
+    # hardcoded resource.
     retrieved_chunks = _retrieve_relevant_chunks(
         request.student_prompt,
-        resource_id=request.resource_id,
+        resource_id=effective_resource_id,
     )
+
+    # --- Asset Grounding (Task 5) ---
+    # When the student is focused on a graph / figure / table / diagram
+    # / equation, fetch the connected educational objects (caption,
+    # on-page chunks, linked question, governing equation) and prepend
+    # them to the RAG context so the tutor can reason from the visible
+    # asset directly.
+    grounded_chunks: list[dict] = []
+    if ctx and ctx.focused_asset:
+        grounded_chunks = _ground_focused_asset(ctx)
+        if grounded_chunks:
+            # Grounded chunks come first — they describe the thing the
+            # student is actually looking at. RAG chunks fill in the
+            # surrounding curriculum context.
+            deduped = list(grounded_chunks)
+            existing_ids = {c.get("id") for c in deduped if c.get("id")}
+            for rc in retrieved_chunks:
+                if rc.get("id") not in existing_ids:
+                    deduped.append(rc)
+            retrieved_chunks = deduped
+
+    # Enrich chunks with resource title + specification-point reference
+    # so student-mode citations can show "Resource title · p.N · spec"
+    # without a second round-trip on the frontend.
+    _enrich_chunks_with_resource_meta(retrieved_chunks, effective_resource_id)
+
     rag_context = _format_chunks_as_context(retrieved_chunks)
     sources = _chunks_to_sources(retrieved_chunks)
 
-    print(f"[RAG] Retrieved {len(retrieved_chunks)} chunks for tutor context.")
+    print(f"[RAG] Retrieved {len(retrieved_chunks)} chunks for tutor context"
+          f" (grounded={len(grounded_chunks)}).")
 
     route_target = evaluate_routing(request.student_prompt)
 
-    # Build system prompt — tutor persona + RAG context (NOT the full JSON)
+    # --- Tutor context preamble (Tasks 1 & 4) ---
+    # When a focused asset is present, tell the tutor EXACTLY which
+    # figure the student is viewing and instruct it to explain / guide /
+    # coach / question from that figure rather than asking the student
+    # to "describe the graph". This is the root-cause fix for the
+    # "Can you describe the graph?" regression.
+    context_preamble = ""
+    if ctx:
+        if ctx.focused_asset_label:
+            asset_kind = ctx.focused_asset_type or "asset"
+            context_preamble = (
+                f"The student is currently viewing {ctx.focused_asset_label} "
+                f"(a {asset_kind}"
+                + (f" on page {ctx.page}" if ctx.page is not None else "")
+                + "). The figure is visible to the student — do NOT ask them "
+                f"to describe it. Instead, acknowledge the figure and help the "
+                f"student work with it: explain what it shows, guide their "
+                f"reasoning, ask a focused question about the figure, or coach "
+                f"them step-by-step. Prefer concrete references to the visible "
+                f"figure (axes, slope, intercepts, labelled values) over "
+                f"generic 'What do you see?' prompts.\n\n"
+            )
+        elif ctx.focused_question:
+            context_preamble = (
+                f"The student is currently working on question "
+                f"'{ctx.focused_question}'. Help them reason through it "
+                f"socratically without revealing the final answer.\n\n"
+            )
+        elif ctx.focused_chunk:
+            context_preamble = (
+                f"The student is currently viewing chunk {ctx.focused_chunk}. "
+                f"Ground your guidance in that content.\n\n"
+            )
+
+    # Build system prompt — tutor persona + context preamble + RAG context
+    # (NOT the full JSON). The persona follows AI_SYSTEM_ARCHITECTURE.md:
+    # teach, guide, question, support — never simply give answers.
     system_prompt = (
         "You are an expert, encouraging Edexcel IGCSE and A-Level Physics Tutor.\n"
         "You are an Edexcel IGCSE Physics Examiner. Never ask hybrid coordinate-graphing questions. Questions must be EITHER a pure mathematical calculation OR a conceptual explanation. Do not deviate from official past-paper formats.\n"
         "You guide students using Socratic questioning and never give the final answer immediately.\n"
+        "When the student asks 'Help me answer', do NOT respond by asking them to describe a graph or figure that they are already viewing. The visible figure is provided to you in the context — use it.\n"
+        "Prefer responses like: \"I can see you're looking at Figure FIG-04. Let's examine it together. What happens to the slope between 2 s and 4 s?\" over generic \"Describe the graph.\" prompts.\n"
         "Format mathematical explanations cleanly.\n"
         "The UI has 4 tabs: Lesson, Worksheet, Simulation, and Quiz. If a student asks to view a resource, take a quiz, or use a simulation, you must append a navigation tag to the end of your response in the exact format: [SWITCH_TAB: TabName] (e.g., [SWITCH_TAB: Quiz]).\n"
     )
+
+    if context_preamble:
+        system_prompt += "\n" + context_preamble
 
     if rag_context:
         system_prompt += (

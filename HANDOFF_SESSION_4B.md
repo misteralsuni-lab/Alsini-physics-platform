@@ -1,237 +1,153 @@
-# Handoff — Session 4B
+# Handoff — Session 4B (Lesson Vertical Slice)
 
-## Worksheet Stabilization Complete → Lesson Experience
-
-**Branch:** `multimodalragsystem`
-**Date:** 2026-07-17
-**Previous session:** 4A (Worksheet Stabilization)
-**Next session:** 4B (Lesson Experience)
+**From:** Session 4A.1 (Worksheet UX & AI Tutor Polish)
+**To:** Session 4B (Lesson Vertical Slice)
+**Date:** 2026-07-20
+**Branch:** `multimodalragsystem` (one clean commit ahead of origin after 4A.1)
 
 ---
 
-## Architecture Summary
+## What 4A.1 Delivered
 
-The EDU-VLE is a React (Vite) frontend + FastAPI backend + Supabase
-(Postgres + Storage) system with a hybrid RAG pipeline.
+1. **LearningContext object** — generic context carrier on `POST /api/tutor`
+   (`backend/main.py`). Replace `focused_asset`-only scaffolding with a
+   structured object that scales to lessons, practicals, quizzes.
+2. **Graph context synchronization** — frontend sends `focused_asset` +
+   `focused_asset_label` + `focused_asset_type` + `page` + `resource_id`
+   so the tutor knows EXACTLY which figure the student is viewing and
+   never asks them to "describe the graph" again.
+3. **Asset grounding** — `_ground_focused_asset()` fetches the asset row
+   + on-page chunks + linked question chunk + governing equation (for
+   graphs) and prepends them to the RAG context.
+4. **Simplified student citations** — student mode shows only
+   Resource/Page/SpecRef; dev mode keeps full provenance.
+5. **Spec-point dropdown removed** — spec points are internal curriculum
+   references, no longer the student's primary navigation.
+6. **Tutor prompt improved** — permanent persona line + dynamic
+   `context_preamble` enforce explain/guide/question/coach from the
+   visible figure.
 
-```
-Frontend (React 19 + Vite, port 5173)
-  App.jsx → VLEDashboard → InteractiveTutor
-    ├─ HybridDocumentViewer (PDF iframe + assets + concept cards)
-    ├─ SearchPanel (hybrid search side panel)
-    ├─ QuizEngine (Quiz tab)
-    └─ AI Tutor chat (FastAPI /api/tutor)
-
-Backend (FastAPI, port 8000)
-  /api/tutor     → RAG retrieval + LLM (OpenCode Zen → NVIDIA → Gemini)
-  /api/search    → Pure vector search
-  /api/search/hybrid → Vector + relational merge
-  /api/grade     → Grading (legacy full-context, NOT RAG)
-  /api/question  → Question fetch
-  /api/resources/{id}/assets → Asset listing
-
-Supabase
-  resources (content JSON)
-  resource_chunks (pgvector 1024-dim, HNSW index)
-  resource_assets (storage_url → Supabase Storage)
-  specification_points, chapters, units
-  resource-assets bucket (public, PDFs + PNGs)
-```
-
-**Key architectural decision (Session 4A):** The RAG retrieval scope
-is now fully dynamic. The frontend sends `resource_id` in the
-`/api/tutor` POST body. The backend passes it to the
-`match_resource_chunks` RPC as `filter_resource_id`. No hardcoded
-resource ids in the tutor path.
+Full details: `WORKSHEET_UX_POLISH_REPORT.md` and
+`GRAPH_CONTEXT_SYNCHRONIZATION.md`.
 
 ---
 
-## Completed Work (Session 4A)
+## What 4B Should Reuse (No Redesign Needed)
 
-1. **Default tab fixed** — App.jsx now defaults to 'Worksheet'.
-2. **Resource pre-fetch** — guard removed; fetches on activeSpecPointId.
-3. **Spec-point selector UI** — dropdown in InteractiveTutor header.
-4. **Dynamic RAG scope** — resource_id flows from frontend → backend → RPC.
-5. **Backend URL extraction** — VITE_API_URL env var (no more hardcode).
-6. **Citation improvements** — compact labels (SRC-A12, EQ-03, FIG-04,
-   TAB-02), clickable, expandable, traceable. Developer mode toggle.
-7. **Focus sync** — SearchPanel navigation scrolls to concept card.
-8. **Dead code removed** — unused Square import, QuizEngine hardcode.
-9. **ESLint hardening** — react/jsx-no-undef rule prevents the
-   original "User is not defined" class of bug.
+### LearningContext is the integration point
 
----
+Session 4B's lesson surface should populate the same `LearningContext`
+object the worksheet surface now populates. The tutor endpoint,
+asset grounding, and citation enrichment already consume it — no
+API changes needed for the lesson surface.
 
-## Remaining Work
+Fields 4B should populate from the lesson surface:
 
-### Session 4B: Lesson Experience (NOT STARTED)
-
-The following are explicitly out of scope for 4A and belong to 4B+:
-
-- Lesson experience implementation
-- Quiz experience implementation (beyond what exists)
-- Progress tracking
-- Learning blocks
-- Teacher analytics
-- ZPD (Zone of Proximal Development)
-- AFL (Assessment for Learning)
-- Yearly planner
-- Markdown workflow
-- Adaptive tutoring
-
-### Technical Debt for 4B+
-
-1. **`/api/grade` still uses `TARGET_RESOURCE_ID`** — the grading
-   endpoint's `fetch_forces_and_motion_data()` still hardcodes the
-   Forces and Motion resource. Needs the same dynamic resource_id
-   treatment as `/api/tutor`. The QuizEngine.jsx no longer has the
-   hardcoded fallback (fixed in 4A), but the backend grade endpoint
-   does.
-
-2. **`source_refs.page` is `None` for most chunks** — embedding
-   pipeline doesn't populate page numbers for concept/relation types.
-   Citation labels fall back to sequential indices. Needs embedding
-   pipeline improvement.
-
-3. **PDF iframe page navigation (`#page=N`)** — not wired. The iframe
-   shows the full PDF but doesn't jump to pages on focus events.
-
-4. **Express server.js is dead code** — not removed. Frontend no
-   longer references it. Consider archiving or deleting in 4B.
-
-5. **`google.generativeai` deprecation** — migrate to `google.genai`.
-
-6. **Bundle size** — 1.13 MB. Code-splitting recommended.
-
-7. **Playwright tests need NSS libs** — ensure the CI environment has
-   `libnspr4` and `libnss3` installed.
-
----
-
-## Recommendations
-
-1. **Start 4B with the Lesson tab.** The Worksheet slice is now
-   stable. The Lesson tab currently renders a placeholder. The
-   architecture (InteractiveTutor orchestrator + HDV + focus state)
-   is reusable for the Lesson experience.
-
-2. **Reuse the dynamic RAG pattern.** The `resource_id` → backend →
-   RPC filter pattern established in 4A should be reused for any
-   new tab that needs RAG retrieval (Lessons, Simulations).
-
-3. **Wire `/api/grade` to dynamic resource_id** early in 4B — the
-   QuizEngine already sends it dynamically; the backend just needs
-   to accept and use it.
-
-4. **Run the Playwright suite in an environment with NSS libs**
-   before merging 4B — the tests are designed to pass and passed in
-   Session 3. The only blocker is the system library availability.
-
----
-
-## Risks
-
-1. **Playwright regression not verified in this environment.** The
-   NSS library limitation means the 14-test regression suite hasn't
-   been re-run against the 4A changes. The build and lint pass, and
-   the changes are surgical, but full E2E verification requires the
-   libraries.
-
-2. **`/api/grade` hardcoded resource** — if a student uses the Quiz
-   tab with a non-Forces-and-Motion worksheet, grading still uses
-   Forces and Motion context. This is a known limitation, not a
-   regression (it was hardcoded before 4A too).
-
-3. **Citation labels are generated client-side** — the label format
-   (SRC-A12, EQ-03) is computed in `citationLabel()`. If the backend
-   adds new chunk types, the `CHUNK_TYPE_PREFIX` map needs updating.
-
----
-
-## Important Files
-
-| File | Role |
-|------|------|
-| `frontend/src/App.jsx` | Root — default tab state (now 'Worksheet') |
-| `frontend/src/components/InteractiveTutor.jsx` | Orchestrator — chat, HDV, search, focus, spec-point selector, dev mode, CitationChip |
-| `frontend/src/components/HybridDocumentViewer.jsx` | PDF iframe + assets + concept cards (conceptCardRefs for scroll sync) |
-| `frontend/src/components/SearchPanel.jsx` | Hybrid search side panel (VITE_API_URL) |
-| `frontend/src/components/QuizEngine.jsx` | Quiz tab (hardcode removed, VITE_API_URL) |
-| `frontend/src/lib/supabaseClient.js` | Supabase client init |
-| `frontend/.env.local` | VITE_API_URL (port 8000), Supabase URL + anon key |
-| `frontend/eslint.config.js` | react/jsx-no-undef rule |
-| `backend/main.py` | FastAPI — /api/tutor (dynamic resource_id), TutorRequest, TutorSource |
-| `backend/pipeline/embedding_pipeline.py` | Chunking + embedding (unchanged in 4A) |
-| `tests/regression.spec.js` | 14-test Playwright suite |
-
----
-
-## Important Commits
-
-| Commit | Description |
-|--------|-------------|
-| c9616f2 | (Session 3) Fixed missing `User` import — the original crash |
-| 2fb20c9 | (Session 3) OpenCode Zen integration |
-| **4A commit** | Worksheet stabilization — all 4A changes |
-
----
-
-## Testing Instructions
-
-### Prerequisites
-
-1. Backend running: `cd backend && .venv/bin/python -m uvicorn main:app --port 8000`
-2. Frontend running: `cd frontend && npm run dev`
-3. For Playwright: `sudo apt-get install -y libnspr4 libnss3`
-
-### Manual smoke test
-
-1. Open `http://localhost:5173` → login
-2. Click a chapter in the sidebar
-3. Verify: Worksheet tab is active by default (not Lesson)
-4. Verify: PDF iframe loads in the worksheet area
-5. Verify: Spec-point selector dropdown is visible in the header
-6. Select a different spec point → worksheet updates
-7. Click "Search" button → SearchPanel opens
-8. Type "velocity" + Enter → results appear
-9. Click a result → concept card scrolls into view + context chip appears
-10. Open AI Tutor (right drawer) → send a message
-11. Verify: AI response has citation chips (SRC-XX, EQ-XX format)
-12. Click a citation chip → expands to show traceability
-13. Click the Code2 icon (dev mode) → click chip again → shows full traceability
-
-### Automated regression
-
-```bash
-cd frontend && npx playwright test
+```python
+learning_context = {
+    "resource_id": <lesson's source resource>,
+    "chapter_id": <chapter>,
+    "lesson_id": <lesson uuid>,              # NEW — 4B introduces lessons
+    "block_id": <learning block uuid>,      # NEW — 4B introduces blocks
+    "focused_chunk": <chunk id if a block is focused>,
+    "page": <page if a PDF block is visible>,
+    # focused_asset_* stay null unless a lesson embeds an asset
+}
 ```
 
+`PEDAGOGICAL_ARCHITECTURE.md §Learning Blocks` defines the block shape:
+each block has Objectives, Explanation, Examples, Analogy, Mini Activity,
+Reflection, Mini Quiz, Completion. The tutor should receive `block_id` so
+its preamble can say "The student is on Block 3 of Lesson 2 —
+Acceleration" instead of the current generic prompt.
+
+### `_ground_focused_asset` is extensible
+
+The helper currently keys off `focused_asset`. For lessons, an analogous
+`_ground_focused_block` could retrieve the block's concepts, linked
+formulas, and linked mini-quiz question — reusing the same PostgREST +
+non-fatal pattern. Do NOT rewrite `_ground_focused_asset`; add a sibling
+helper and call whichever matches `learning_context` shape.
+
+### Citation policy is stable
+
+Student-mode shows Resource/Page/SpecRef. Dev mode shows full provenance.
+4B should NOT change this — it is aligned with
+`AI_SYSTEM_ARCHITECTURE.md §Citation Policy` and
+`RAG_ARCHITECTURE.md §Developer Mode`. New surfaces emit the same
+`TutorSource` shape.
+
 ---
 
-## Lessons Learned
+## Known Limitations Deferred to 4B
 
-1. **A single missing import can mask all other bugs.** The `User`
-   crash (Session 3) made every downstream symptom look like a
-   different bug. The forensic methodology (isolate trigger vs root
-   cause) was essential.
+1. **Live browser verification of the tutor's graph-awareness reply**
+   could not be completed in 4A.1 because the WSL session lacked the
+   FastAPI backend + Supabase + NVIDIA NIM stack. 4B (or a deployment
+   with the full stack) should run the acceptance test:
+   - Focus a graph in the worksheet
+   - Ask "Help me answer."
+   - Verify the tutor reply references FIG-XX (not "describe the graph")
+   - Verify the citation chips under the reply include the grounded asset
+     chunk as `[Source 1]`
 
-2. **Default tab choice is a UX-critical decision.** Defaulting to
-   'Lesson' (a placeholder) made the entire worksheet look broken.
-   The worksheet was there all along — just hidden behind a tab
-   the user had to discover.
+2. **`resource_assets.linked_question_id` population** — the asset
+   grounding helper reads this field, but `PROJECT_ROADMAP.md` notes it
+   is not yet populated for most assets. 4B should run
+   `backend/pipeline/linked_question_resolver.py` to populate it so the
+   linked-question grounding path activates at runtime.
 
-3. **Static analysis gates prevent classes of bugs.** The
-   `react/jsx-no-undef` rule would have caught the original `User`
-   bug at lint time. Adding it is a one-time investment that pays
-   off forever.
+3. **Pre-existing ESLint `motion` false-positive** in
+   `HybridDocumentViewer.jsx:3`. 4A.1 did NOT touch this (per "no
+   drive-by cleanup" git rule). 4B may address it as part of normal
+   maintenance.
 
-4. **Dynamic scoping must flow end-to-end.** Half-dynamic
-   (frontend sends question, backend hardcodes resource_id) is worse
-   than fully static — it creates a false sense of dynamic behavior.
-   The fix required changes in the frontend payload, the backend
-   model, and the retrieval function signature.
+4. **`/api/grade` still uses full-context dump** (`fetch_forces_and_motion_data`).
+   This is pre-existing technical debt tracked in
+   `PROJECT_ROADMAP.md §Technical Debt Register`. 4A.1 did not migrate it
+   (out of scope — no architectural changes). 4B may migrate it to RAG
+   using the same `_retrieve_relevant_chunks` helper.
 
-5. **Citation traceability is a UX feature, not just a technical one.**
-   Compact labels (SRC-A12) + expandable detail gives students a
-   clean view and developers a full audit trail. The developer mode
-   toggle avoids overwhelming students with metadata.
+---
+
+## Source-of-Truth Documents (Unchanged by 4A.1)
+
+4A.1 made NO changes to the architecture documents. They remain the
+source of truth for 4B:
+
+- `docs/architecture/SYSTEM_ARCHITECTURE.md`
+- `docs/architecture/PEDAGOGICAL_ARCHITECTURE.md`
+- `docs/architecture/AI_SYSTEM_ARCHITECTURE.md`
+- `docs/architecture/RAG_ARCHITECTURE.md`
+- `docs/architecture/PROJECT_ROADMAP.md`
+
+If 4B's lesson implementation conflicts with any of them, STOP and report
+the conflict before proceeding (per the standing instruction).
+
+---
+
+## Git State After 4A.1
+
+- Branch: `multimodalragsystem`
+- One logical commit: `feat: worksheet UX polish + graph context sync + LearningContext (Session 4A.1)`
+- Working tree clean before commit
+- No new dependencies
+- No unrelated refactoring
+- No drive-by cleanup
+- All static acceptance tests pass; live browser verification deferred
+  (documented in `SESSION_4A1_QA_REPORT.md`)
+
+---
+
+## Suggested First Steps for 4B
+
+1. Read `WORKSHEET_UX_POLISH_REPORT.md` and `GRAPH_CONTEXT_SYNCHRONIZATION.md`
+   to understand the LearningContext contract.
+2. Run `linked_question_resolver.py` to populate `linked_question_id` so
+   the grounding path activates.
+3. Implement the Lesson surface, populating `LearningContext.lesson_id`
+   and `LearningContext.block_id` as the student navigates blocks.
+4. Add `_ground_focused_block` as a sibling of `_ground_focused_asset`
+   (same PostgREST + non-fatal pattern) for block-level grounding.
+5. Run the deferred live acceptance test (graph focus → tutor reply
+   references FIG-XX) once the full stack is available.

@@ -46,6 +46,11 @@ function citationLabel(src, index) {
 }
 
 // Expandable citation chip — compact for students, expandable for full traceability.
+// Student mode (Task 2): shows only the compact label; on click expands
+//   to reveal Resource title · Page · Specification reference. Nothing else.
+// Developer mode (Task 2): additionally exposes chunk id, raw similarity,
+//   resource id, chunk index, specification_point_id — full provenance per
+//   RAG_ARCHITECTURE.md §Developer Mode.
 const CitationChip = ({ src, index, devMode }) => {
   const [expanded, setExpanded] = useState(false);
   const label = citationLabel(src, index);
@@ -54,31 +59,41 @@ const CitationChip = ({ src, index, devMode }) => {
     <div className="inline-block">
       <button
         onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+        aria-expanded={expanded}
         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#151515] border border-white/10 text-[10px] text-gray-500 font-mono hover:border-emerald-500/30 hover:text-emerald-400 transition-colors"
-        title={`${src.chunk_type} · similarity: ${(src.similarity || 0).toFixed(2)}`}
+        title={devMode ? `${src.chunk_type} · similarity: ${(src.similarity || 0).toFixed(4)}` : label}
+        aria-label={`Citation ${label}${devMode ? ' (developer mode)' : ''}`}
       >
         <span className="text-emerald-500/60">{label}</span>
-        {src.concept && <span className="text-gray-400 hidden sm:inline">· {src.concept}</span>}
         <ChevronDown className={`w-2.5 h-2.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {expanded && (
-        <div className="absolute mt-1 z-50 p-3 rounded-lg bg-[#0A0A0A] border border-white/10 shadow-xl text-[10px] font-mono space-y-1 min-w-[240px]">
+        <div className="absolute mt-1 z-50 p-3 rounded-lg bg-[#0A0A0A] border border-white/10 shadow-xl text-[10px] font-mono space-y-1.5 min-w-[220px]">
           <div className="flex items-center justify-between border-b border-white/5 pb-1.5 mb-1.5">
             <span className="text-emerald-400 font-medium">{label}</span>
-            <span className="text-gray-600 uppercase text-[9px]">{src.chunk_type}</span>
+            {devMode && src.chunk_type && (
+              <span className="text-gray-600 uppercase text-[9px]">{src.chunk_type}</span>
+            )}
           </div>
-          <div className="space-y-0.5 text-gray-500">
-            <div><span className="text-gray-600">concept:</span> <span className="text-gray-400">{src.concept || '—'}</span></div>
-            <div><span className="text-gray-600">page:</span> <span className="text-gray-400">{src.page != null ? src.page : '—'}</span></div>
-            <div><span className="text-gray-600">type:</span> <span className="text-gray-400">{src.chunk_type}</span></div>
-            <div><span className="text-gray-600">similarity:</span> <span className="text-gray-400">{src.similarity != null ? (src.similarity * 100).toFixed(1) + '%' : '—'}</span></div>
-            <div className="truncate"><span className="text-gray-600">chunk_id:</span> <span className="text-gray-400">{src.chunk_id ? src.chunk_id.substring(0, 8) + '…' : '—'}</span></div>
+          {/* Student-visible fields only (Task 2): Resource title, page, spec ref */}
+          <div className="space-y-1 text-gray-400">
+            {src.resource_title && (
+              <div><span className="text-gray-600">Resource:</span> <span className="text-gray-300">{src.resource_title}</span></div>
+            )}
+            <div><span className="text-gray-600">Page:</span> <span className="text-gray-300">{src.page != null ? src.page : '—'}</span></div>
+            {src.specification_point_ref && (
+              <div><span className="text-gray-600">Spec:</span> <span className="text-gray-300">{src.specification_point_ref}</span></div>
+            )}
           </div>
           {devMode && (
-            <div className="mt-2 pt-1.5 border-t border-white/5 space-y-0.5 text-[9px] text-gray-600">
+            <div className="mt-2 pt-1.5 border-t border-white/5 space-y-1 text-[9px] text-gray-600">
               <div className="text-amber-500/60 uppercase tracking-wider mb-0.5">Developer Mode</div>
               <div><span className="text-gray-700">chunk_id:</span> {src.chunk_id || '—'}</div>
-              <div><span className="text-gray-700">raw similarity:</span> {src.similarity != null ? src.similarity.toFixed(4) : '—'}</div>
+              <div><span className="text-gray-700">chunk_type:</span> {src.chunk_type || '—'}</div>
+              <div><span className="text-gray-700">similarity:</span> {src.similarity != null ? src.similarity.toFixed(4) : '—'}</div>
+              <div className="truncate"><span className="text-gray-700">resource_id:</span> {src.resource_id || '—'}</div>
+              <div><span className="text-gray-700">spec_id:</span> {src.specification_point_id || '—'}</div>
+              <div><span className="text-gray-700">chunk_index:</span> {src.chunk_index != null ? src.chunk_index : '—'}</div>
             </div>
           )}
         </div>
@@ -106,7 +121,12 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
   const [devMode, setDevMode] = useState(false);
 
   // Data Fetching States
-  const [specPoints, setSpecPoints] = useState([]);
+  // NOTE: `specPoints` state is intentionally NOT kept — the spec-point
+  // dropdown was removed (Session 4A.1 Task 3, per
+  // PEDAGOGICAL_ARCHITECTURE.md). Specification points remain internal
+  // curriculum references: the first spec point for the chapter is
+  // resolved automatically to scope resource fetching, but the list is
+  // no longer surfaced as student navigation.
   const [activeSpecPointId, setActiveSpecPointId] = useState(null);
   const [worksheetResource, setWorksheetResource] = useState(null);
   const [isFetchingResource, setIsFetchingResource] = useState(false);
@@ -126,18 +146,21 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
   }, [messages, isLoading]);
 
   // Fetch Specification Points for the Chapter
+  // Resolves the first spec point id to scope resource fetching. The
+  // spec points themselves are not surfaced as student navigation
+  // (Task 3); they remain internal curriculum references.
   useEffect(() => {
     const fetchSpecPoints = async () => {
       if (!chapterId) return;
       try {
         const { data, error } = await supabase
           .from('specification_points')
-          .select('*')
+          .select('id')
           .eq('chapter_id', chapterId)
-          .order('created_at', { ascending: true });
+          .order('created_at', { ascending: true })
+          .limit(1);
 
         if (error) throw error;
-        setSpecPoints(data || []);
         if (data && data.length > 0) {
           setActiveSpecPointId(data[0].id);
         }
@@ -224,19 +247,21 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
       }));
 
     try {
-      // 3. Call FastAPI /api/tutor with RAG-retrieved context
-      //    Dynamic RAG scope: pass the current worksheet's resource_id
-      //    so the backend retrieves chunks from the SELECTED worksheet,
-      //    not a hardcoded resource.
-      let contextualPrompt = userMessageText;
-      if (focus) {
-        let ctx = '';
-        if (focus.concept) ctx = `The student is looking at the concept "${focus.concept}". `;
-        else if (focus.asset_type) ctx = `The student is viewing a ${focus.asset_type} on page ${focus.page || '?'}. `;
-        else if (focus.spec_point) ctx = `The student is on specification point "${focus.spec_point}". `;
-        contextualPrompt = ctx + userMessageText;
-        setFocus(null); // consume the context chip
-      }
+      // 3. Call FastAPI /api/tutor with RAG-retrieved context + structured
+      //    LearningContext (Session 4A.1). The context carries the
+      //    focused asset/chunk/page/resource so the tutor can acknowledge
+      //    the visible figure and guide from it rather than asking the
+      //    student to "describe the graph". See GRAPH_CONTEXT_SYNCHRONIZATION.md.
+      const learningContext = focus ? {
+        resource_id: worksheetResource?.id || null,
+        chapter_id: chapterId || null,
+        focused_chunk: focus.focused_chunk || null,
+        focused_asset: focus.asset_id || focus.focused_asset || null,
+        focused_asset_label: focus.asset_label || null,
+        focused_asset_type: focus.asset_type || null,
+        focused_question: focus.focused_question || null,
+        page: focus.page ?? null,
+      } : null;
 
       const response = await fetch(`${API_BASE}/api/tutor`, {
         method: 'POST',
@@ -244,9 +269,10 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          student_prompt: contextualPrompt,
+          student_prompt: userMessageText,
           history: formattedHistory,
           resource_id: worksheetResource?.id || null,
+          learning_context: learningContext,
         })
       });
 
@@ -333,22 +359,14 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
 
            {/* Tab Row + Search Toggle + Dev Mode */}
            <div className="flex items-center gap-2 flex-wrap">
-             {/* Spec-point selector (dynamic) */}
-             {specPoints.length > 0 && (
-               <select
-                 value={activeSpecPointId || ''}
-                 onChange={(e) => setActiveSpecPointId(e.target.value)}
-                 className="bg-[#111] border border-white/5 rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500/50 max-w-[180px] overflow-hidden text-ellipsis"
-                 title="Select specification point"
-                 aria-label="Specification point selector"
-               >
-                 {specPoints.map((sp) => (
-                   <option key={sp.id} value={sp.id} className="bg-[#111]">
-                     {sp.reference_code || sp.id.substring(0, 8)}
-                   </option>
-                 ))}
-               </select>
-             )}
+             {/* Specification points are internal curriculum references
+                 (PEDAGOGICAL_ARCHITECTURE.md §Curriculum Hierarchy) —
+                 they remain in the DB, retrieval, citations, and
+                 teacher analytics, but are no longer exposed as the
+                 student's primary navigation. The active spec point is
+                 still resolved automatically from the chapter's first
+                 spec point (see fetchSpecPoints above) for resource
+                 scoping. */}
              <div className="flex bg-[#111] border border-white/5 rounded-lg p-1 overflow-x-auto hide-scrollbar">
                 {['Lesson', 'Worksheet', 'Simulation', 'Quiz'].map((tab) => (
                   <button
@@ -547,19 +565,17 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
               {/* Sync context chip — shows what the student focused on in the viewer */}
               {focus && (
                 <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs">
-                  <span className="text-emerald-400/70 font-mono uppercase tracking-wider text-[10px]">Context</span>
+                  <span className="text-emerald-400/70 font-mono uppercase tracking-wider text-[10px]">Viewing</span>
                   <span className="text-gray-300">
-                    {focus.concept && `Concept: ${focus.concept}`}
-                    {focus.asset_type && `Asset: ${focus.asset_type}${focus.page ? ` (p.${focus.page})` : ''}`}
-                    {focus.spec_point && `Spec: ${focus.spec_point}`}
+                    {focus.asset_label && `${focus.asset_label}${focus.asset_type ? ` · ${focus.asset_type}` : ''}${focus.page != null ? ` · p.${focus.page}` : ''}`}
+                    {!focus.asset_label && focus.concept && `Concept: ${focus.concept}`}
+                    {!focus.asset_label && !focus.concept && focus.asset_type && `${focus.asset_type}${focus.page != null ? ` · p.${focus.page}` : ''}`}
                   </span>
                   <button
                     onClick={() => setFocus(null)}
                     className="ml-auto text-gray-500 hover:text-gray-300 transition-colors text-[10px]"
                     aria-label="Clear context"
-                  >
-                    ✕
-                  </button>
+                  >✕</button>
                 </div>
               )}
               <form onSubmit={handleSend} className="relative flex items-center">

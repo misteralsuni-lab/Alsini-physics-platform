@@ -23,7 +23,7 @@ const itemVariants = {
 };
 
 // --- Visual Asset Card ---
-const AssetCard = ({ asset, onZoom, onFocus }) => {
+const AssetCard = ({ asset, onZoom, onFocus, assetIndex = 0 }) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -34,6 +34,26 @@ const AssetCard = ({ asset, onZoom, onFocus }) => {
     setRetryCount((c) => c + 1);
   };
 
+  // Compact citation label for this asset (FIG-04 / TAB-02 / EQ-03).
+  // Mirrors the backend CHUNK_TYPE_PREFIX map so the label the student
+  // sees on the focus chip matches the citation chips under the tutor's
+  // reply. See GRAPH_CONTEXT_SYNCHRONIZATION.md.
+  const _ASSET_PREFIX = {
+    figure: 'FIG', graph: 'FIG', plot: 'FIG',
+    table: 'TAB', plotting_grid: 'TAB',
+    equation: 'EQ', formula: 'EQ',
+  };
+  const _assetLabel = (() => {
+    const prefix = _ASSET_PREFIX[asset.asset_type] || 'FIG';
+    const page = asset.page_number;
+    if (page != null) {
+      const pageLetter = String.fromCharCode(65 + ((page - 1) % 26));
+      const idx = String(assetIndex + 1).padStart(2, '0');
+      return `${prefix}-${pageLetter}${idx}`;
+    }
+    return `${prefix}-${String(assetIndex + 1).padStart(2, '0')}`;
+  })();
+
   return (
     <motion.div
       variants={itemVariants}
@@ -42,7 +62,13 @@ const AssetCard = ({ asset, onZoom, onFocus }) => {
       {/* Asset image */}
       <div
         className="relative flex items-center justify-center bg-white/95 min-h-[200px] cursor-pointer"
-        onClick={() => onFocus && onFocus({ type: 'asset', asset_id: asset.id, asset_type: asset.asset_type, page: asset.page_number })}
+        onClick={() => onFocus && onFocus({
+          type: 'asset',
+          asset_id: asset.id,
+          asset_type: asset.asset_type,
+          page: asset.page_number,
+          asset_label: _assetLabel,
+        })}
       >
         {!isLoaded && !hasError && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80">
@@ -422,10 +448,11 @@ const HybridDocumentViewer = ({ resourceId, focus, onFocus, conceptCardRefs }) =
                       </span>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {assets.map((asset) => (
+                      {assets.map((asset, ai) => (
                         <AssetCard
                           key={asset.id}
                           asset={asset}
+                          assetIndex={ai}
                           onZoom={setZoomAsset}
                           onFocus={onFocus}
                         />
