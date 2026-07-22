@@ -3,6 +3,11 @@ import { chromium } from 'playwright';
 const ROOT = '/home/alsuni/Alsini-physics-platform';
 const LIBS = '/tmp/chromelibs/usr/lib/x86_64-linux-gnu';
 const EXEC = '/home/alsuni/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome';
+const EMAIL = process.env.E2E_EMAIL;
+const PASSWORD = process.env.E2E_PASSWORD;
+if (!EMAIL || !PASSWORD) {
+  throw new Error('E2E_EMAIL and E2E_PASSWORD must be provided.');
+}
 
 const browser = await chromium.launch({
   executablePath: EXEC,
@@ -24,8 +29,8 @@ await page.goto('/');
 await page.evaluate(() => localStorage.clear());
 await page.goto('/auth');
 await page.getByPlaceholder('Email Address').waitFor({ state: 'visible', timeout: 20_000 });
-await page.getByPlaceholder('Email Address').fill(process.env.E2E_EMAIL || 'e2e_test@alsini.dev');
-await page.getByPlaceholder('Password').fill(process.env.E2E_PASSWORD || 'E2Etest1234');
+await page.getByPlaceholder('Email Address').fill(EMAIL);
+await page.getByPlaceholder('Password').fill(PASSWORD);
 await page.getByRole('button', { name: 'Login', exact: true }).click();
 await page.waitForTimeout(6000);
 console.log('FINAL URL', page.url());

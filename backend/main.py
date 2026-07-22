@@ -70,9 +70,13 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="A valid Supabase access token is required.")
 
     try:
-        return response.json()
+        user = response.json()
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Authentication service returned an invalid user.") from exc
+
+    if not isinstance(user, dict) or not user.get("id"):
+        raise HTTPException(status_code=401, detail="Authentication service returned no user identity.")
+    return user
 
 
 # Initialize APIs
@@ -1186,6 +1190,13 @@ async def grade_endpoint(
     request: GradeRequest,
     _user: dict = Depends(get_current_user),
 ):
+    authenticated_student_id = str(_user.get("id"))
+    if request.student_id != authenticated_student_id:
+        raise HTTPException(
+            status_code=403,
+            detail="student_id must match the authenticated user.",
+        )
+
     context_data = fetch_forces_and_motion_data()
     
     system_prompt = (

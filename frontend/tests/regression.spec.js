@@ -22,6 +22,11 @@ const GOLDEN_RESOURCE_ID = '5729d034-a6c7-4f35-b81c-fcac447289c7';
 const DASHBOARD_URL = `/dashboard/unit/${UNIT_ID}/chapter/${CHAPTER_ID}`;
 const BACKEND = 'http://localhost:8000';
 const GRAPH_ASSET = 'page2_graph_0.png';
+const E2E_EMAIL = process.env.E2E_EMAIL;
+const E2E_PASSWORD = process.env.E2E_PASSWORD;
+if (!E2E_EMAIL || !E2E_PASSWORD) {
+  throw new Error('E2E_EMAIL and E2E_PASSWORD must be provided to run Playwright tests.');
+}
 
 // Collect console / page / network diagnostics for every test.
 async function installDiagnostics(page) {
@@ -110,8 +115,8 @@ test('[1] User can log in', async ({ page }) => {
   await page.evaluate(() => localStorage.clear());
   await page.goto('/auth');
   await expect(page.getByPlaceholder('Email Address')).toBeVisible({ timeout: 20_000 });
-  await page.getByPlaceholder('Email Address').fill(process.env.E2E_EMAIL || 'e2e_test@alsini.dev');
-  await page.getByPlaceholder('Password').fill(process.env.E2E_PASSWORD || 'E2Etest1234');
+  await page.getByPlaceholder('Email Address').fill(E2E_EMAIL);
+  await page.getByPlaceholder('Password').fill(E2E_PASSWORD);
   await page.getByRole('button', { name: 'Login', exact: true }).click();
   await page.waitForURL('**/dashboard**', { timeout: 20_000 });
   await expect(page).toHaveURL(/\/dashboard/);
