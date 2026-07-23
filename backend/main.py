@@ -117,10 +117,12 @@ class LearningContext(BaseModel):
     worksheet_id: Optional[str] = None
     focused_chunk: Optional[str] = None
     focused_asset: Optional[str] = None
-    # Human-readable asset label when the student is viewing a graph /
-    # figure / table / diagram / equation asset (e.g. "FIG-04"). When
-    # present the tutor must acknowledge the visible asset and guide
-    # from it rather than asking the student to describe it.
+    # DEPRECATED (Session 4A.2): The backend now generates canonical citation
+    # labels server-side via _canonical_asset_label(). This field is retained
+    # on the model for backward API compatibility but is NEVER used by the
+    # backend — it is not trusted and not read. The frontend no longer sends
+    # it. New code MUST NOT use this field; use the asset_label returned in
+    # TutorSource instead.
     focused_asset_label: Optional[str] = None
     focused_asset_type: Optional[str] = None
     focused_question: Optional[str] = None
@@ -318,6 +320,52 @@ def _chunks_to_sources(chunks: list[dict]) -> list[TutorSource]:
 # Reuses the existing Supabase PostgREST path — no new RPC, no new
 # schema. Non-fatal: any failure returns an empty list so the tutor
 # still answers from general RAG retrieval.
+def _canonical_asset_label(asset_row: dict) -> Optional[str]:
+    """
+    Generate a canonical citation label for a visual asset from its
+    VERIFIED asset row, so the same id appears in:
+
+      - the tutor context preamble
+      - the synthetic TutorSource
+      - the frontend focus chip
+      - developer mode
+      - audit reports
+
+    The label is derived from the asset's verified `asset_type` and
+    `page_number` plus a deterministic 1-based ordinal within the asset's
+    page. This is the single source of truth; the frontend MUST render
+    only this value and never invent one.
+
+    Format: PREFIX-LNN where L is a page letter (1=A, 2=B, ...) and NN is
+    a zero-padded ordinal of the asset within its page. The ordinal is
+    precomputed by the caller from the page-ordered asset set returned by
+    PostgREST, so reordering a client-side array cannot change ids.
+
+    Returns None if the asset row is malformed; the caller must then
+    omit the label rather than fall back to a client-supplied one.
+    """
+    asset_type = (asset_row.get("asset_type") or "").lower()
+    prefix = {
+        "figure": "FIG", "graph": "FIG", "plot": "FIG",
+        "table": "TAB", "plotting_grid": "TAB",
+        "equation": "EQ", "formula": "EQ",
+    }.get(asset_type, "FIG")
+
+    page = asset_row.get("page_number")
+    ordinal = asset_row.get("_page_ordinal") or 1
+    try:
+        ordinal_int = int(ordinal)
+    except (TypeError, ValueError):
+        ordinal_int = 1
+    if page is None:
+        return f"{prefix}-{ordinal_int:02d}"
+    try:
+        page_letter = chr(ord("A") + ((int(page) - 1) % 26))
+    except (TypeError, ValueError):
+        page_letter = ""
+    return f"{prefix}-{page_letter}{ordinal_int:02d}"
+
+
 def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
     """
     Retrieve connected educational objects for a focused visual asset.
@@ -348,21 +396,28 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
             seen_chunk_ids.add(cid)
         grounded.append(c)
 
-    # 1. Fetch the asset itself so we can read its caption / linked question.
+    # 1. Fetch the asset row AND resource's full asset list to compute
+    #    the canonical citation ordinal. The single-asset query verifies
+    #    the asset belongs to the resource; the full-list query computes
+    #    a stable 1-based ordinal within the asset's page so the label
+    #    cannot be changed by client-side reordering.
     asset_endpoint = f"{SUPABASE_URL}/rest/v1/resource_assets"
     asset_caption: Optional[str] = None
     linked_question_id: Optional[str] = None
     asset_type: Optional[str] = learning_context.focused_asset_type
     asset_url: Optional[str] = None
     asset_id: Optional[str] = None
+    asset_row: Optional[dict] = None
+    # The canonical asset_label is generated ONLY by the backend from the
+    # verified asset row. The client-supplied `focused_asset_label` is
+    # ignored (SESSION_4A1_VERIFICATION_REPORT.md section 8 release blocker).
+    canonical_asset_label: Optional[str] = None
     try:
         ar = requests.get(
             asset_endpoint,
             headers=headers,
             params={
                 "id": f"eq.{learning_context.focused_asset}",
-                # The asset and selected worksheet must belong to the same
-                # resource before either can enter tutor context.
                 "resource_id": f"eq.{resource_id}",
                 "select": "id,resource_id,page_number,asset_type,storage_url,caption,linked_question_id,metadata",
                 "limit": "1",
@@ -382,13 +437,47 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         asset_url = a.get("storage_url")
         asset_caption = a.get("caption")
         linked_question_id = a.get("linked_question_id")
-        # Never trust client-supplied type/page when the asset row is known.
         asset_type = a.get("asset_type") or asset_type
         page = a.get("page_number") if a.get("page_number") is not None else page
+        asset_row = a
     except requests.RequestException as exc:
         raise HTTPException(status_code=503, detail="Asset verification service is unavailable.") from exc
 
-    # 2. On-page chunks — the reading-order text that surrounds the asset.
+    # Compute the canonical citation label from the verified asset row.
+    # The ordinal is the 1-based position within the asset's page in the
+    # page_number.asc, created_at.asc ordering returned by PostgREST.
+    if asset_row is not None:
+        try:
+            ordered = requests.get(
+                asset_endpoint,
+                headers=headers,
+                params={
+                    "resource_id": f"eq.{resource_id}",
+                    "select": "id,page_number,asset_type,created_at",
+                    "order": "page_number.asc,created_at.asc",
+                    "limit": "500",
+                },
+                timeout=10,
+            )
+            if ordered.status_code == 200:
+                assets_list = ordered.json()
+                page_counter: dict[int, int] = {}
+                for item in assets_list:
+                    pn = item.get("page_number")
+                    if pn is None:
+                        continue
+                    try:
+                        pn_int = int(pn)
+                    except (TypeError, ValueError):
+                        continue
+                    page_counter[pn_int] = page_counter.get(pn_int, 0) + 1
+                    if item.get("id") == asset_id:
+                        asset_row["_page_ordinal"] = page_counter[pn_int]
+        except requests.RequestException:
+            pass
+        canonical_asset_label = _canonical_asset_label(asset_row)
+
+    # 2. On-page chunks - the reading-order text that surrounds the asset.
     if page is not None:
         page_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
         try:
@@ -411,7 +500,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         except requests.RequestException as exc:
             raise HTTPException(status_code=503, detail="Page grounding service is unavailable.") from exc
 
-    # 3. Linked worksheet question chunk (asset → question id → chunk).
+    # 3. Linked worksheet question chunk (asset -> question id -> chunk).
     if linked_question_id:
         qid = linked_question_id.strip()
         q_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
@@ -436,34 +525,57 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         except requests.RequestException:
             pass
 
-    # 4. Linked equation / formula chunks — when the asset is a graph,
-    #    the governing equation is the most pedagogically valuable link.
-    #    We pull formula chunks for the same resource; the tutor's
-    #    system prompt stresses figure+equation reasoning.
+    # 4. Linked formula chunk - DETERMINISTIC, fail-closed.
+    #    When the asset is a graph, the governing equation must come from
+    #    an EXPLICIT relationship stored in the asset's metadata JSONB
+    #    (metadata.linked_formula_chunk_id). If no explicit link exists,
+    #    we OMIT the formula entirely and set a no-formula marker so the
+    #    tutor honestly says "No governing formula is linked to this graph"
+    #    instead of guessing from unrelated formula chunks.
+    #
+    #    NEVER use semantic similarity or arbitrary formula retrieval as a
+    #    substitute for an explicit relationship (Issue 2, Session 4A.2).
+    no_linked_formula = False
     if asset_type and "graph" in (asset_type or "").lower():
-        eq_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
-        try:
-            er = requests.get(
-                eq_endpoint,
-                headers=headers,
-                params={
-                    "resource_id": f"eq.{resource_id}",
-                    "chunk_type": "eq.formula",
-                    "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
-                    "limit": "3",
-                },
-                timeout=12,
-            )
-            if er.status_code == 200:
-                for c in er.json():
-                    c.setdefault("resource_id", resource_id)
-                    _append_chunk(c)
-        except requests.RequestException:
-            pass
+        metadata = (asset_row or {}).get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                import json as _json
+                metadata = _json.loads(metadata)
+            except (ValueError, TypeError):
+                metadata = {}
+        linked_formula_chunk_id = metadata.get("linked_formula_chunk_id") if isinstance(metadata, dict) else None
+        if linked_formula_chunk_id:
+            # Retrieve ONLY the explicitly linked formula chunk.
+            eq_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
+            try:
+                er = requests.get(
+                    eq_endpoint,
+                    headers=headers,
+                    params={
+                        "id": f"eq.{linked_formula_chunk_id}",
+                        "resource_id": f"eq.{resource_id}",
+                        "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+                        "limit": "1",
+                    },
+                    timeout=12,
+                )
+                if er.status_code == 200:
+                    for c in er.json():
+                        c.setdefault("resource_id", resource_id)
+                        _append_chunk(c)
+            except requests.RequestException:
+                pass
+        else:
+            # No explicit formula link - fail closed. The tutor must
+            # honestly state that no governing formula is linked rather
+            # than hallucinate one from unrelated chunks.
+            no_linked_formula = True
 
-    # 5. Synthetic "asset" pseudo-chunk — lets the formatter surface the
+    # 5. Synthetic "asset" pseudo-chunk - lets the formatter surface the
     #    caption as a citation-friendly block. Tagged as a figure chunk so
-    #    it picks up the FIG- prefix in the citation label.
+    #    it picks up the FIG- prefix. The asset_label is the SERVER-CANONICAL
+    #    value generated above, never the client-supplied label.
     if asset_caption or asset_type:
         grounded.insert(0, {
             "id": f"asset:{learning_context.focused_asset}",
@@ -475,11 +587,11 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
             "similarity": None,
             "asset_id": asset_id,
             "asset_url": asset_url,
-            "asset_label": learning_context.focused_asset_label,
+            "asset_label": canonical_asset_label,
+            "no_linked_formula": no_linked_formula,
         })
 
     return grounded
-
 
 def _enrich_chunks_with_resource_meta(chunks: list[dict], resource_id: Optional[str]) -> None:
     """
@@ -713,10 +825,29 @@ async def tutor_endpoint(
     # "Can you describe the graph?" regression.
     context_preamble = ""
     if ctx:
-        if ctx.focused_asset_label:
+        # Derive the canonical asset label from the grounded chunks (the
+        # synthetic asset chunk at index 0 carries the backend-generated
+        # canonical label). Fall back to the context label only if no
+        # grounded chunks were produced (non-fatal path).
+        canonical_label = None
+        no_linked_formula = False
+        if grounded_chunks:
+            for gc in grounded_chunks:
+                if gc.get("asset_label"):
+                    canonical_label = gc["asset_label"]
+                    no_linked_formula = gc.get("no_linked_formula", False)
+                    break
+        # ISSUE 1 (Session 4A.2): The canonical label comes ONLY from the
+        # backend-grounded asset row. We do NOT fall back to the client-
+        # supplied focused_asset_label — the frontend no longer sends it,
+        # and trusting a client label would re-introduce the source-of-truth
+        # violation. If no grounded chunk carries a canonical label, the
+        # preamble simply uses the asset type without a citation ID.
+        effective_label = canonical_label
+        if effective_label:
             asset_kind = ctx.focused_asset_type or "asset"
             context_preamble = (
-                f"The student is currently viewing {ctx.focused_asset_label} "
+                f"The student is currently viewing {effective_label} "
                 f"(a {asset_kind}"
                 + (f" on page {ctx.page}" if ctx.page is not None else "")
                 + "). The figure is visible to the student — do NOT ask them "
@@ -727,6 +858,13 @@ async def tutor_endpoint(
                 f"figure (axes, slope, intercepts, labelled values) over "
                 f"generic 'What do you see?' prompts.\n\n"
             )
+            if no_linked_formula:
+                context_preamble += (
+                    "No governing formula is linked to this graph. Do NOT "
+                    "invent or guess an equation. If the student asks about "
+                    "the governing formula, state honestly that no verified "
+                    "governing formula is linked to this graph.\n\n"
+                )
         elif ctx.focused_question:
             context_preamble = (
                 f"The student is currently working on question "
