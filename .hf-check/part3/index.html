@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* === DESIGN.md palette (Alsini Physics Platform onboarding) === */
+      /*  Canvas #050505  Surface #0D0D0D  SurfaceEl #141414               */
+      /*  Primary #00D4AA  Secondary #FF6B35  Tertiary #6C5CE7              */
+      /*  TextPrim #F5F5F5 TextSec #9CA3AF TextMut #6B7280 Border #1F1F1F  */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #050505; }
+      body { font-family: "IBM Plex Sans", sans-serif; color: #F5F5F5; }
+      code, pre { font-family: "JetBrains Mono", monospace; }
+      .scene { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; display: flex; flex-direction: column; padding: 80px 120px; gap: 24px; overflow: hidden; background-color: #050505; }
+      /* Title card: solid canvas + a 2px #00D4AA accent line under the headline (DESIGN 'Title Card') */
+      .title-card { justify-content: center; align-items: center; text-align: center; padding: 0 200px; background-color: #050505; }
+      .title-main { font-family: "Space Grotesk", sans-serif; font-size: 80px; font-weight: 700; letter-spacing: -0.03em; color: #F5F5F5; margin-bottom: 16px; }
+      .title-accent { height: 2px; width: 60%; background-color: #00D4AA; transform-origin: left center; margin: 0 auto 24px; }
+      .title-sub { font-family: "IBM Plex Sans", sans-serif; font-size: 24px; font-weight: 400; color: #9CA3AF; margin-bottom: 24px; }
+      .title-version { display: flex; gap: 12px; justify-content: center; }
+      .version-badge { background-color: rgba(0,212,170,0.12); border: 1px solid rgba(0,212,170,0.25); border-radius: 8px; padding: 8px 16px; font-family: "JetBrains Mono", monospace; font-size: 14px; font-weight: 500; color: #00D4AA; }
+      .scene-header { margin-bottom: 8px; }
+      .scene-title { font-family: "Space Grotesk", sans-serif; font-size: clamp(1.75rem, 3.5vw, 3rem); font-weight: 600; letter-spacing: -0.02em; color: #F5F5F5; }
+      .scene-subtitle { font-family: "IBM Plex Sans", sans-serif; font-size: 20px; color: #9CA3AF; margin-top: 4px; }
+      .content-grid { display: grid; gap: 16px; flex: 1; overflow: hidden; }
+      .grid-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .grid-3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }
+      .card { background-color: #0D0D0D; border: 1px solid #1F1F1F; border-radius: 8px; padding: 24px; transition: border-color 0.2s, transform 0.2s; }
+      .card-title { font-family: "Space Grotesk", sans-serif; font-size: 16px; font-weight: 600; color: #00D4AA; margin-bottom: 8px; }
+      .card-body { font-family: "IBM Plex Sans", sans-serif; font-size: 14px; line-height: 1.6; color: #9CA3AF; }
+      .card-body code { background-color: rgba(0,212,170,0.08); color: #00D4AA; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+      .pipeline { display: flex; gap: 0; align-items: stretch; flex: 1; }
+      .pipeline-step { flex: 1; background-color: #0D0D0D; border: 1px solid #1F1F1F; padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center; justify-content: center; }
+      .pipeline-step:first-child { border-radius: 8px 0 0 8px; }
+      .pipeline-step:last-child { border-radius: 0 8px 8px 0; }
+      .step-num { font-family: "Space Grotesk", sans-serif; font-size: 28px; font-weight: 700; color: #00D4AA; margin-bottom: 8px; }
+      .step-label { font-family: "IBM Plex Sans", sans-serif; font-size: 14px; font-weight: 600; color: #F5F5F5; margin-bottom: 4px; }
+      .step-detail { font-family: "JetBrains Mono", monospace; font-size: 12px; color: #9CA3AF; }
+      .pipeline-arrow { display: flex; align-items: center; color: #00D4AA; font-size: 24px; padding: 0 4px; }
+      .footer-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #1F1F1F; margin-top: auto; }
+      .footer-bar span { font-family: "JetBrains Mono", monospace; font-size: 13px; color: #9CA3AF; }
+      /* Subtle scan line (DESIGN 'Title Card' linear sweep) — decorative, no info */
+      .scan-line { position: absolute; left: 0; top: 0; width: 100%; height: 2px; background-color: #00D4AA; opacity: 0.08; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="part3" data-start="0" data-duration="60" data-width="1920" data-height="1080">
+
+      <!-- Scene 7: Ingestion Pipeline (0-20s) -->
+      <div id="scene-7" class="clip scene" data-start="0" data-duration="20" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">Ingestion Pipeline</div>
+          <div class="scene-subtitle">MinerU OCR → OpenKB JSON → Supabase → Embeddings</div>
+        </div>
+        <div class="pipeline">
+          <div class="pipeline-step"><div class="step-num">01</div><div class="step-label">PDF Input</div><div class="step-detail">Edexcel textbook</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">02</div><div class="step-label">MinerU OCR</div><div class="step-detail">Layout-aware extract</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">03</div><div class="step-label">OpenKB JSON</div><div class="step-detail">Chunked + tagged</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">04</div><div class="step-label">Supabase DB</div><div class="step-detail">curriculum_chunks</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">05</div><div class="step-label">Embeddings</div><div class="step-detail">text-embedding-3-small</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>Ingestion Pipeline</span></div>
+      </div>
+
+      <!-- Scene 8: Key Workflows (20-40s) -->
+      <div id="scene-8" class="clip scene" data-start="20" data-duration="20" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">Key User Workflows</div>
+          <div class="scene-subtitle">How students and teachers use the platform</div>
+        </div>
+        <div class="content-grid grid-2">
+          <div class="card"><div class="card-title">RAG Tutor</div><div class="card-body">Student question → retrieve relevant chunks → context → stream LLM response with citations.</div></div>
+          <div class="card"><div class="card-title">Worksheet Viewer</div><div class="card-body">Open worksheet → PDF images + text overlay → interactive highlight and note elements.</div></div>
+          <div class="card"><div class="card-title">Quiz &amp; Grading</div><div class="card-body">Start quiz → render → submit → auto-grade (MCQ) or LLM-grade (free-text) → store in quiz_attempts.</div></div>
+          <div class="card"><div class="card-title">Search</div><div class="card-body">Full-text search across curriculum → ranked results → click to open source PDF at exact page.</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>User Workflows</span></div>
+      </div>
+
+      <!-- Scene 9: Developer Workflow (40-55s) -->
+      <div id="scene-9" class="clip scene" data-start="40" data-duration="15" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">Developer Workflow</div>
+          <div class="scene-subtitle">Commands, testing, known issues, VS Code</div>
+        </div>
+        <div class="content-grid grid-2">
+          <div class="card"><div class="card-title">Commands</div><div class="card-body">npm run dev (port 5173), uvicorn main:app --reload (port 8000), node scripts/seed_curriculum.js, python run_asset_pipeline.py.</div></div>
+          <div class="card"><div class="card-title">Known Issues</div><div class="card-body">Critical: Express server migrating to FastAPI. Medium: PDF text positioning drift. Low: legacy server.js routes.</div></div>
+          <div class="card"><div class="card-title">Environment</div><div class="card-body">SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY, LLM_PROVIDER. All in .env (gitignored).</div></div>
+          <div class="card"><div class="card-title">VS Code</div><div class="card-body">ESLint, Prettier, Python, Jupyter. Debug configs in .vscode/launch.json. Auto-format on save.</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>Developer Workflow</span></div>
+      </div>
+
+      <!-- Scene 10: Closing (55-60s) -->
+      <div id="scene-10" class="clip scene title-card" data-start="55" data-duration="5" data-track-index="0">
+        <div class="scan-line" id="scan-10"></div>
+        <div class="title-main">Welcome to the Team</div>
+        <div class="title-accent" id="accent-10"></div>
+        <div class="title-sub">Start with ONBOARDING.md and INTELLIGENT_LEARNING_ARCHITECTURE.md</div>
+        <div class="title-version">
+          <span class="version-badge">docs/ONBOARDING.md</span>
+          <span class="version-badge">docs/RAG_INTEGRATION.md</span>
+          <span class="version-badge">ASSET_PIPELINE.md</span>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      // Scene 7: Ingestion Pipeline — entrances only
+      tl.fromTo('#scene-7 .scene-title',    {opacity:0, x:60}, {opacity:1, x:0, duration:0.8, ease:'power3.out'}, 0.0);
+      tl.fromTo('#scene-7 .scene-subtitle', {opacity:0, x:40}, {opacity:1, x:0, duration:0.6, ease:'power2.out'}, 0.3);
+      tl.fromTo('#scene-7 .pipeline-step',  {opacity:0, x:40}, {opacity:1, x:0, duration:0.5, stagger:0.08, ease:'power2.out'}, 0.5); // 0.08 DESIGN stagger
+      tl.fromTo('#scene-7 .footer-bar',     {opacity:0},       {opacity:1, duration:0.4, ease:'power2.out'}, 0.1);
+
+      // Scene 8: Key Workflows
+      tl.fromTo('#scene-8 .scene-title',    {opacity:0, x:60}, {opacity:1, x:0, duration:0.8, ease:'power3.out'}, 20.0);
+      tl.fromTo('#scene-8 .scene-subtitle', {opacity:0, x:40}, {opacity:1, x:0, duration:0.6, ease:'power2.out'}, 20.3);
+      tl.fromTo('#scene-8 .card',           {opacity:0, x:40}, {opacity:1, x:0, duration:0.5, stagger:0.08, ease:'power2.out'}, 20.5);
+      tl.fromTo('#scene-8 .footer-bar',     {opacity:0},       {opacity:1, duration:0.4, ease:'power2.out'}, 20.1);
+
+      // Scene 9: Developer Workflow
+      tl.fromTo('#scene-9 .scene-title',    {opacity:0, x:60}, {opacity:1, x:0, duration:0.8, ease:'power3.out'}, 40.0);
+      tl.fromTo('#scene-9 .scene-subtitle', {opacity:0, x:40}, {opacity:1, x:0, duration:0.6, ease:'power2.out'}, 40.3);
+      tl.fromTo('#scene-9 .card',           {opacity:0, x:40}, {opacity:1, x:0, duration:0.5, stagger:0.08, ease:'power2.out'}, 40.5);
+      tl.fromTo('#scene-9 .footer-bar',     {opacity:0},       {opacity:1, duration:0.4, ease:'power2.out'}, 40.1);
+
+      // Scene 10: Closing — DESIGN Title Card: power3.out/power2.out, accent line draws in, scan line sweeps
+      tl.fromTo('#scene-10 .title-main',   {opacity:0, y:24}, {opacity:1, y:0, duration:1.0, ease:'power3.out'}, 55.2);
+      tl.fromTo('#accent-10',              {scaleX:0},        {scaleX:1, duration:0.8, ease:'power2.out'}, 55.6);
+      tl.fromTo('#scene-10 .title-sub',    {opacity:0, y:20}, {opacity:1, y:0, duration:0.8, ease:'power2.out'}, 55.9);
+      tl.fromTo('#scene-10 .title-version',{opacity:0, y:16}, {opacity:1, y:0, duration:0.6, ease:'power2.out'}, 56.4);
+      // 5s linear scan-line sweep (DESIGN Title Card spec) — finite repeat over the 5s scene
+      tl.fromTo('#scan-10', {y:0}, {y:1080, duration:5, ease:'linear', repeat: 0}, 55);
+
+      // Final scene fade-out (DESIGN/composition.md allow fade on the LAST scene only)
+      tl.to('#scene-10', {opacity:0, duration:0.6, ease:'power2.inOut'}, 59.4);
+
+      window.__timelines["part3"] = tl;
+
+      // Keyboard timeline controls
+      var hfKbd = {
+        tl: tl,
+        duration: 60,
+        hud: null,
+        labels: { '1':0, '2':20, '3':40, '4':55 },
+        init: function() {
+          this.hud = document.createElement('div');
+          this.hud.id = 'hf-hud';
+          this.hud.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;z-index:9999;background:rgba(0,0,0,0.7);color:#10b981;font:14px/1.4 monospace;padding:8px 16px;display:none;pointer-events:none';
+          document.body.appendChild(this.hud);
+          var self = this;
+          document.addEventListener('keydown', function(e) {
+            var t = self.tl.time();
+            switch(e.key) {
+              case ' ':
+                e.preventDefault();
+                if (self.tl.paused()) { self.tl.resume(); self.show('▶'); }
+                else { self.tl.pause(); self.show('⏸'); }
+                break;
+              case 'ArrowRight': e.preventDefault(); self.tl.time(Math.min(t + 1, self.duration)); self.show(t => (t+1).toFixed(1)+'s'); break;
+              case 'ArrowLeft': e.preventDefault(); self.tl.time(Math.max(t - 1, 0)); self.show(t => (t-1).toFixed(1)+'s'); break;
+              case 'ArrowUp': e.preventDefault(); self.tl.time(Math.min(t + 0.1, self.duration)); break;
+              case 'ArrowDown': e.preventDefault(); self.tl.time(Math.max(t - 0.1, 0)); break;
+              case 'Home': e.preventDefault(); self.tl.time(0); self.show('⏮ 0s'); break;
+              case 'End': e.preventDefault(); self.tl.time(self.duration - 0.04); self.show('⏭ '+self.duration+'s'); break;
+              case 'h': case 'H': e.preventDefault(); self.hud.style.display = self.hud.style.display === 'none' ? 'block' : 'none'; break;
+            }
+            if (e.key >= '1' && e.key <= '9' && self.labels[e.key] !== undefined) {
+              e.preventDefault();
+              self.tl.time(self.labels[e.key]);
+              self.show('🔢 ' + self.labels[e.key] + 's');
+            }
+          });
+        },
+        show: function(msg) {
+          this.hud.textContent = typeof msg === 'function' ? msg(this.tl.time()) : msg + ' | t=' + this.tl.time().toFixed(1) + 's';
+          this.hud.style.display = 'block';
+          clearTimeout(this.hud._hide);
+          this.hud._hide = setTimeout(function(self) { self.hud.style.display = 'none'; }, 2000, this);
+        }
+      };
+      hfKbd.init();
+    </script>
+  </body>
+</html>
