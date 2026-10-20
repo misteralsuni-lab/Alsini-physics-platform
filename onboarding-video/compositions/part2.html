@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* === DESIGN.md palette (Alsini Physics Platform onboarding) === */
+      /*  Canvas #050505  Surface #0D0D0D  SurfaceEl #141414               */
+      /*  Primary #00D4AA  Secondary #FF6B35  Tertiary #6C5CE7              */
+      /*  TextPrim #F5F5F5 TextSec #9CA3AF TextMut #6B7280 Border #1F1F1F  */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #050505; }
+      body { font-family: "IBM Plex Sans", sans-serif; color: #F5F5F5; }
+      code, pre { font-family: "JetBrains Mono", monospace; }
+      .scene { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; display: flex; flex-direction: column; padding: 80px 120px; gap: 24px; overflow: hidden; background-color: #050505; }
+      /* Title card: solid canvas + a 2px #00D4AA accent line under the headline (DESIGN 'Title Card') */
+      .title-card { justify-content: center; align-items: center; text-align: center; padding: 0 200px; background-color: #050505; }
+      .title-main { font-family: "Space Grotesk", sans-serif; font-size: 80px; font-weight: 700; letter-spacing: -0.03em; color: #F5F5F5; margin-bottom: 16px; }
+      .title-accent { height: 2px; width: 60%; background-color: #00D4AA; transform-origin: left center; margin: 0 auto 24px; }
+      .title-sub { font-family: "IBM Plex Sans", sans-serif; font-size: 24px; font-weight: 400; color: #9CA3AF; margin-bottom: 24px; }
+      .title-version { display: flex; gap: 12px; justify-content: center; }
+      .version-badge { background-color: rgba(0,212,170,0.12); border: 1px solid rgba(0,212,170,0.25); border-radius: 8px; padding: 8px 16px; font-family: "JetBrains Mono", monospace; font-size: 14px; font-weight: 500; color: #00D4AA; }
+      .scene-header { margin-bottom: 8px; }
+      .scene-title { font-family: "Space Grotesk", sans-serif; font-size: clamp(1.75rem, 3.5vw, 3rem); font-weight: 600; letter-spacing: -0.02em; color: #F5F5F5; }
+      .scene-subtitle { font-family: "IBM Plex Sans", sans-serif; font-size: 20px; color: #9CA3AF; margin-top: 4px; }
+      .content-grid { display: grid; gap: 16px; flex: 1; overflow: hidden; }
+      .grid-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .grid-3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }
+      .card { background-color: #0D0D0D; border: 1px solid #1F1F1F; border-radius: 8px; padding: 24px; transition: border-color 0.2s, transform 0.2s; }
+      .card-title { font-family: "Space Grotesk", sans-serif; font-size: 16px; font-weight: 600; color: #00D4AA; margin-bottom: 8px; }
+      .card-body { font-family: "IBM Plex Sans", sans-serif; font-size: 14px; line-height: 1.6; color: #9CA3AF; }
+      .card-body code { background-color: rgba(0,212,170,0.08); color: #00D4AA; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+      .pipeline { display: flex; gap: 0; align-items: stretch; flex: 1; }
+      .pipeline-step { flex: 1; background-color: #0D0D0D; border: 1px solid #1F1F1F; padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center; justify-content: center; }
+      .pipeline-step:first-child { border-radius: 8px 0 0 8px; }
+      .pipeline-step:last-child { border-radius: 0 8px 8px 0; }
+      .step-num { font-family: "Space Grotesk", sans-serif; font-size: 28px; font-weight: 700; color: #00D4AA; margin-bottom: 8px; }
+      .step-label { font-family: "IBM Plex Sans", sans-serif; font-size: 14px; font-weight: 600; color: #F5F5F5; margin-bottom: 4px; }
+      .step-detail { font-family: "JetBrains Mono", monospace; font-size: 12px; color: #9CA3AF; }
+      .pipeline-arrow { display: flex; align-items: center; color: #00D4AA; font-size: 24px; padding: 0 4px; }
+      .footer-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #1F1F1F; margin-top: auto; }
+      .footer-bar span { font-family: "JetBrains Mono", monospace; font-size: 13px; color: #9CA3AF; }
+      /* Subtle scan line (DESIGN 'Title Card' linear sweep) — decorative, no info */
+      .scan-line { position: absolute; left: 0; top: 0; width: 100%; height: 2px; background-color: #00D4AA; opacity: 0.08; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="part2" data-start="0" data-duration="60" data-width="1920" data-height="1080">
+
+      <!-- Scene 4: Backend Services (0-25s) -->
+      <div id="scene-4" class="clip scene" data-start="0" data-duration="25" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">Backend Services</div>
+          <div class="scene-subtitle">FastAPI tutor engine, RAG pipeline, grading, search</div>
+        </div>
+        <div class="content-grid grid-2">
+          <div class="card"><div class="card-title">Tutor Chat</div><div class="card-body">POST /api/tutor/chat. Retrieves relevant chunks, then streams LLM response with SSE.</div></div>
+          <div class="card"><div class="card-title">LLM Router</div><div class="card-body">Provider-agnostic: openai (GPT-4o), gemini (2.5 Flash), ollama (local), custom. Failover: primary → fallback → local.</div></div>
+          <div class="card"><div class="card-title">Grading Engine</div><div class="card-body">/api/grade. LLM-based free-text grading with rubric. MCQ/multi-select graded deterministically.</div></div>
+          <div class="card"><div class="card-title">Search &amp; Embeddings</div><div class="card-body">/api/search — full-text search. /api/rag/embed-chunk — embeddings via text-embedding-3-small (500-token chunks).</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>Backend Services</span></div>
+      </div>
+
+      <!-- Scene 5: Data Layer (25-45s) -->
+      <div id="scene-5" class="clip scene" data-start="25" data-duration="20" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">Data Layer</div>
+          <div class="scene-subtitle">Supabase schema, RLS policies, curriculum hierarchy</div>
+        </div>
+        <div class="content-grid grid-2">
+          <div class="card"><div class="card-title">Curriculum Hierarchy</div><div class="card-body">5-level tree: curriculum → topics → subtopics → lessons → worksheets. UUID PKs, exam_board + level metadata.</div></div>
+          <div class="card"><div class="card-title">Resource &amp; Quiz Tables</div><div class="card-body">resource_assets — PDF images, text blocks, positions. quiz_attempts — per-question results, scores, feedback, indexed on student_id + worksheet_id.</div></div>
+          <div class="card"><div class="card-title">Row-Level Security</div><div class="card-body">RLS on all tables. Students see own quiz attempts. Teachers see assigned students. Admins full access.</div></div>
+          <div class="card"><div class="card-title">Migrations</div><div class="card-body">migrations/*.sql. Curriculum seeding via node scripts/seed_curriculum.js. Checks for existing data.</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>Data Layer</span></div>
+      </div>
+
+      <!-- Scene 6: Asset Pipeline (45-60s) -->
+      <div id="scene-6" class="clip scene" data-start="45" data-duration="15" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">Visual Asset Pipeline</div>
+          <div class="scene-subtitle">PDF → PyMuPDF → Storage → Database</div>
+        </div>
+        <div class="pipeline">
+          <div class="pipeline-step"><div class="step-num">01</div><div class="step-label">PDF Upload</div><div class="step-detail">Worksheet PDF</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">02</div><div class="step-label">PyMuPDF</div><div class="step-detail">Image + text extract</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">03</div><div class="step-label">Storage</div><div class="step-detail">Supabase bucket</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">04</div><div class="step-label">Database</div><div class="step-detail">resource_assets</div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><div class="step-num">05</div><div class="step-label">Viewer</div><div class="step-detail">Hybrid overlay</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>Asset Pipeline</span></div>
+      </div>
+
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      // Scene 4: Backend — entrances only; framework switches scene visibility at data-start
+      tl.fromTo('#scene-4 .scene-title',    {opacity:0, x:60}, {opacity:1, x:0, duration:0.8, ease:'power3.out'}, 0.0);
+      tl.fromTo('#scene-4 .scene-subtitle', {opacity:0, x:40}, {opacity:1, x:0, duration:0.6, ease:'power2.out'}, 0.3);
+      tl.fromTo('#scene-4 .card',           {opacity:0, x:40}, {opacity:1, x:0, duration:0.5, stagger:0.08, ease:'power2.out'}, 0.5); // 0.08 DESIGN stagger
+      tl.fromTo('#scene-4 .footer-bar',     {opacity:0},       {opacity:1, duration:0.4, ease:'power2.out'}, 0.1);
+
+      // Scene 5: Data
+      tl.fromTo('#scene-5 .scene-title',    {opacity:0, x:60}, {opacity:1, x:0, duration:0.8, ease:'power3.out'}, 25.0);
+      tl.fromTo('#scene-5 .scene-subtitle', {opacity:0, x:40}, {opacity:1, x:0, duration:0.6, ease:'power2.out'}, 25.3);
+      tl.fromTo('#scene-5 .card',           {opacity:0, x:40}, {opacity:1, x:0, duration:0.5, stagger:0.08, ease:'power2.out'}, 25.5);
+      tl.fromTo('#scene-5 .footer-bar',     {opacity:0},       {opacity:1, duration:0.4, ease:'power2.out'}, 25.1);
+
+      // Scene 6: Asset Pipeline
+      tl.fromTo('#scene-6 .scene-title',    {opacity:0, x:60}, {opacity:1, x:0, duration:0.8, ease:'power3.out'}, 45.0);
+      tl.fromTo('#scene-6 .scene-subtitle', {opacity:0, x:40}, {opacity:1, x:0, duration:0.6, ease:'power2.out'}, 45.3);
+      tl.fromTo('#scene-6 .pipeline-step',  {opacity:0, x:40}, {opacity:1, x:0, duration:0.5, stagger:0.08, ease:'power2.out'}, 45.5);
+      tl.fromTo('#scene-6 .footer-bar',     {opacity:0},       {opacity:1, duration:0.4, ease:'power2.out'}, 45.1);
+
+      window.__timelines["part2"] = tl;
+
+      // Keyboard timeline controls
+      var hfKbd = {
+        tl: tl,
+        duration: 60,
+        hud: null,
+        labels: { '1':0, '2':25, '3':45 },
+        init: function() {
+          this.hud = document.createElement('div');
+          this.hud.id = 'hf-hud';
+          this.hud.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;z-index:9999;background:rgba(0,0,0,0.7);color:#10b981;font:14px/1.4 monospace;padding:8px 16px;display:none;pointer-events:none';
+          document.body.appendChild(this.hud);
+          var self = this;
+          document.addEventListener('keydown', function(e) {
+            var t = self.tl.time();
+            switch(e.key) {
+              case ' ':
+                e.preventDefault();
+                if (self.tl.paused()) { self.tl.resume(); self.show('▶'); }
+                else { self.tl.pause(); self.show('⏸'); }
+                break;
+              case 'ArrowRight': e.preventDefault(); self.tl.time(Math.min(t + 1, self.duration)); self.show(t => (t+1).toFixed(1)+'s'); break;
+              case 'ArrowLeft': e.preventDefault(); self.tl.time(Math.max(t - 1, 0)); self.show(t => (t-1).toFixed(1)+'s'); break;
+              case 'ArrowUp': e.preventDefault(); self.tl.time(Math.min(t + 0.1, self.duration)); break;
+              case 'ArrowDown': e.preventDefault(); self.tl.time(Math.max(t - 0.1, 0)); break;
+              case 'Home': e.preventDefault(); self.tl.time(0); self.show('⏮ 0s'); break;
+              case 'End': e.preventDefault(); self.tl.time(self.duration - 0.04); self.show('⏭ '+self.duration+'s'); break;
+              case 'h': case 'H': e.preventDefault(); self.hud.style.display = self.hud.style.display === 'none' ? 'block' : 'none'; break;
+            }
+            if (e.key >= '1' && e.key <= '9' && self.labels[e.key] !== undefined) {
+              e.preventDefault();
+              self.tl.time(self.labels[e.key]);
+              self.show('🔢 ' + self.labels[e.key] + 's');
+            }
+          });
+        },
+        show: function(msg) {
+          this.hud.textContent = typeof msg === 'function' ? msg(this.tl.time()) : msg + ' | t=' + this.tl.time().toFixed(1) + 's';
+          this.hud.style.display = 'block';
+          clearTimeout(this.hud._hide);
+          this.hud._hide = setTimeout(function(self) { self.hud.style.display = 'none'; }, 2000, this);
+        }
+      };
+      hfKbd.init();
+    </script>
+  </body>
+</html>

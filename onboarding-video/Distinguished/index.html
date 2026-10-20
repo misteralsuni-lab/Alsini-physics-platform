@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #050505; }
+      body { font-family: "Inter", sans-serif; color: #fafafa; }
+      code, pre { font-family: "JetBrains Mono", monospace; }
+      .scene { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; display: flex; flex-direction: column; padding: 80px 120px; gap: 24px; overflow: hidden; }
+      .title-card { justify-content: center; align-items: center; text-align: center; padding: 0 200px; background: radial-gradient(ellipse at center, rgba(16,185,129,0.06) 0%, transparent 70%); }
+      .title-main { font-size: 80px; font-weight: 800; letter-spacing: -0.03em; background: linear-gradient(135deg, #10b981, #34d399, #fafafa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 16px; }
+      .title-sub { font-size: 24px; font-weight: 400; color: #888; margin-bottom: 24px; }
+      .title-version { display: flex; gap: 12px; justify-content: center; }
+      .version-badge { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 500; color: #34d399; }
+      .scene-header { margin-bottom: 8px; }
+      .scene-title { font-size: 48px; font-weight: 700; letter-spacing: -0.02em; color: #fafafa; }
+      .scene-subtitle { font-size: 20px; color: #888; margin-top: 4px; }
+      .content-grid { display: grid; gap: 16px; flex: 1; overflow: hidden; }
+      .grid-2 { grid-template-columns: 1fr 1fr; }
+      .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+      .card { background: linear-gradient(145deg, #0d0d0d, #0a0a0a); border: 1px solid #1a1a1a; border-radius: 12px; padding: 24px; }
+      .card-title { font-size: 16px; font-weight: 600; color: #10b981; margin-bottom: 8px; }
+      .card-body { font-size: 14px; line-height: 1.6; color: #999; }
+      .card-body code { background: rgba(16,185,129,0.08); color: #34d399; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+      .pipeline { display: flex; gap: 0; align-items: stretch; flex: 1; }
+      .pipeline-step { flex: 1; background: #0d0d0d; border: 1px solid #1a1a1a; padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center; justify-content: center; }
+      .pipeline-step:first-child { border-radius: 12px 0 0 12px; }
+      .pipeline-step:last-child { border-radius: 0 12px 12px 0; }
+      .step-num { font-size: 28px; font-weight: 800; color: #10b981; margin-bottom: 8px; }
+      .step-label { font-size: 14px; font-weight: 600; color: #fafafa; margin-bottom: 4px; }
+      .step-detail { font-size: 12px; color: #666; }
+      .pipeline-arrow { display: flex; align-items: center; color: #10b981; font-size: 24px; padding: 0 4px; }
+      .workflow-item { display: flex; gap: 16px; align-items: flex-start; padding: 16px; background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 10px; }
+      .workflow-icon { font-size: 24px; min-width: 40px; text-align: center; }
+      .workflow-text h3 { font-size: 16px; font-weight: 600; color: #fafafa; margin-bottom: 4px; }
+      .workflow-text p { font-size: 13px; color: #888; line-height: 1.5; }
+      .code-block { background: #080808; border: 1px solid #1a1a1a; border-radius: 10px; padding: 16px 20px; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.7; overflow: hidden; white-space: pre; }
+      .kw { color: #c084fc; } .str { color: #34d399; } .cmt { color: #555; } .fn { color: #60a5fa; } .var { color: #fbbf24; }
+      .footer-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #1a1a1a; margin-top: auto; }
+      .footer-bar span { font-size: 13px; color: #555; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="60" data-width="1920" data-height="1080">
+
+      <!-- Scene 1: Title Card (0-10s) -->
+      <div id="scene-1" class="clip scene title-card" data-start="0" data-duration="10" data-track-index="0">
+        <div class="title-main">Alsini Physics Platform</div>
+        <div class="title-sub">Developer Onboarding — Architecture, Workflows &amp; Operations</div>
+        <div class="title-version">
+          <span class="version-badge">v1.0 — multimodalragsystem branch</span>
+          <span class="version-badge">Edexcel IGCSE / A-Level Physics</span>
+        </div>
+      </div>
+
+      <!-- Scene 2: Architecture Overview (10-30s) -->
+      <div id="scene-2" class="clip scene" data-start="10" data-duration="20" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">System Architecture</div>
+          <div class="scene-subtitle">Dual-backend, Supabase spine, curriculum-first design</div>
+        </div>
+        <div class="content-grid grid-2">
+          <div class="card"><div class="card-title">Frontend — React + Vite</div><div class="card-body">SPA on port 5173. Auth via Supabase, role-based routing (admin/student/teacher). Components: <code>VLEDashboard</code>, <code>InteractiveTutor</code>, <code>HybridDocumentViewer</code>, <code>QuizEngine</code>.</div></div>
+          <div class="card"><div class="card-title">Backend — FastAPI (port 8000)</div><div class="card-body">Python 3.11+ with Uvicorn. AI tutor engine with RAG pipeline. Routes: <code>/api/tutor/chat</code>, <code>/api/grade</code>, <code>/api/search</code>.</div></div>
+          <div class="card"><div class="card-title">Supabase — Database &amp; Storage</div><div class="card-body">PostgreSQL with RLS. Curriculum hierarchy: <code>curriculum</code> → <code>topics</code> → <code>subtopics</code> → <code>lessons</code> → <code>worksheets</code>.</div></div>
+          <div class="card"><div class="card-title">Express Server (port 3001)</div><div class="card-body">Legacy Node.js server. Being migrated to FastAPI. Manages PDF uploads and text extraction.</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>Architecture Overview</span></div>
+      </div>
+
+      <!-- Scene 3: Frontend Deep Dive (30-55s) -->
+      <div id="scene-3" class="clip scene" data-start="30" data-duration="25" data-track-index="0">
+        <div class="scene-header">
+          <div class="scene-title">Frontend Deep Dive</div>
+          <div class="scene-subtitle">React 19, component architecture, auth flow</div>
+        </div>
+        <div class="content-grid grid-3">
+          <div class="card"><div class="card-title">VLE Dashboard</div><div class="card-body">Student-facing dashboard showing topic progress, upcoming deadlines, worksheets and quizzes.</div></div>
+          <div class="card"><div class="card-title">Interactive Tutor</div><div class="card-body">AI-powered chat with streaming responses. Context-aware: receives curriculum chunk IDs, topic metadata, conversation history.</div></div>
+          <div class="card"><div class="card-title">Hybrid Document Viewer</div><div class="card-body">Renders PDFs with overlaid interactive elements. PyMuPDF images as base layer, Supabase text on top.</div></div>
+          <div class="card"><div class="card-title">Quiz Engine</div><div class="card-body">Multi-format quiz: MCQ, multi-select, free-text, calculation. Auto-grades via <code>/api/grade</code>.</div></div>
+          <div class="card"><div class="card-title">Search Panel</div><div class="card-body">Full-text search across curriculum content. Supabase full-text search with ranking.</div></div>
+          <div class="card"><div class="card-title">Auth &amp; Role Routing</div><div class="card-body">Supabase Auth with JWT tokens. Roles: <code>admin</code>, <code>teacher</code>, <code>student</code>. Protected routes.</div></div>
+        </div>
+        <div class="footer-bar"><span>Alsini Physics Platform</span><span>Frontend Architecture</span></div>
+      </div>
+
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      // Scene 1: Title Card
+      tl.fromTo('#scene-1 .title-main', {opacity:0, scale:0.85}, {opacity:1, scale:1, duration:1.2, ease:'elastic.out(1,0.5)'}, 0.3);
+      tl.fromTo('#scene-1 .title-sub', {opacity:0, y:40}, {opacity:1, y:0, duration:1, ease:'power3.out'}, 0.8);
+      tl.fromTo('#scene-1 .title-version', {opacity:0, y:20}, {opacity:1, y:0, duration:0.8, ease:'power2.out'}, 1.5);
+
+      // Scene 2: Architecture
+      tl.fromTo('#scene-2 .scene-title', {opacity:0,y:30}, {opacity:1,y:0,duration:0.8,ease:'power3.out'}, 10.2);
+      tl.fromTo('#scene-2 .scene-subtitle', {opacity:0,y:20}, {opacity:1,y:0,duration:0.6,ease:'power2.out'}, 10.5);
+      tl.fromTo('#scene-2 .card', {opacity:0,y:20}, {opacity:1,y:0,duration:0.5,stagger:0.06,ease:'power2.out'}, 10.7);
+      tl.fromTo('#scene-2 .footer-bar', {opacity:0}, {opacity:1,duration:0.4,ease:'power2.out'}, 10.3);
+
+      // Scene 3: Frontend
+      tl.fromTo('#scene-3 .scene-title', {opacity:0,y:30}, {opacity:1,y:0,duration:0.8,ease:'power3.out'}, 30.2);
+      tl.fromTo('#scene-3 .scene-subtitle', {opacity:0,y:20}, {opacity:1,y:0,duration:0.6,ease:'power2.out'}, 30.5);
+      tl.fromTo('#scene-3 .card', {opacity:0,y:20}, {opacity:1,y:0,duration:0.5,stagger:0.06,ease:'power2.out'}, 30.7);
+      tl.fromTo('#scene-3 .footer-bar', {opacity:0}, {opacity:1,duration:0.4,ease:'power2.out'}, 30.3);
+
+      window.__timelines["main"] = tl;
+
+      // Keyboard timeline controls
+      var hfKbd = {
+        tl: tl,
+        duration: 60,
+        hud: null,
+        labels: { '1':0, '2':10, '3':20, '4':30, '5':40, '6':50 },
+        init: function() {
+          this.hud = document.createElement('div');
+          this.hud.id = 'hf-hud';
+          this.hud.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;z-index:9999;background:rgba(0,0,0,0.7);color:#10b981;font:14px/1.4 monospace;padding:8px 16px;display:none;pointer-events:none';
+          document.body.appendChild(this.hud);
+          var self = this;
+          document.addEventListener('keydown', function(e) {
+            var t = self.tl.time();
+            switch(e.key) {
+              case ' ':
+                e.preventDefault();
+                if (self.tl.paused()) { self.tl.resume(); self.show('▶'); }
+                else { self.tl.pause(); self.show('⏸'); }
+                break;
+              case 'ArrowRight': e.preventDefault(); self.tl.time(Math.min(t + 1, self.duration)); self.show(t => (t+1).toFixed(1)+'s'); break;
+              case 'ArrowLeft': e.preventDefault(); self.tl.time(Math.max(t - 1, 0)); self.show(t => (t-1).toFixed(1)+'s'); break;
+              case 'ArrowUp': e.preventDefault(); self.tl.time(Math.min(t + 0.1, self.duration)); break;
+              case 'ArrowDown': e.preventDefault(); self.tl.time(Math.max(t - 0.1, 0)); break;
+              case 'Home': e.preventDefault(); self.tl.time(0); self.show('⏮ 0s'); break;
+              case 'End': e.preventDefault(); self.tl.time(self.duration - 0.04); self.show('⏭ '+self.duration+'s'); break;
+              case 'h': case 'H': e.preventDefault(); self.hud.style.display = self.hud.style.display === 'none' ? 'block' : 'none'; break;
+            }
+            if (e.key >= '1' && e.key <= '9' && self.labels[e.key] !== undefined) {
+              e.preventDefault();
+              self.tl.time(self.labels[e.key]);
+              self.show('🔢 ' + self.labels[e.key] + 's');
+            }
+          });
+        },
+        show: function(msg) {
+          this.hud.textContent = typeof msg === 'function' ? msg(this.tl.time()) : msg + ' | t=' + this.tl.time().toFixed(1) + 's';
+          this.hud.style.display = 'block';
+          clearTimeout(this.hud._hide);
+          this.hud._hide = setTimeout(function(self) { self.hud.style.display = 'none'; }, 2000, this);
+        }
+      };
+      hfKbd.init();
+    </script>
+  </body>
+</html>
