@@ -28,6 +28,9 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Core no-unused-vars does not treat JSX identifiers (e.g. motion in
+      // <motion.div>) as used; this companion rule does.
+      'react/jsx-uses-vars': 'error',
       // Prevents the class of bug that caused the original
       // "User is not defined" runtime crash (forensic report V1).
       // JSX identifiers must resolve to an in-scope binding.
@@ -37,6 +40,13 @@ export default defineConfig([
       react: {
         version: 'detect',
       },
+    },
+  },
+  {
+    // Playwright config, auth setup, and specs run in Node and use `process`.
+    files: ['playwright.config.js', 'tests/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
     },
   },
 ])

@@ -9,7 +9,7 @@ import rehypeKatex from 'rehype-katex';
 // Backend API base URL — sourced from env, falls back to localhost:8000 for dev.
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-const QuizEngine = ({ resourceId, activeSpecPointId }) => {
+const QuizEngine = ({ resourceId }) => {
   const [questionIndex, setQuestionIndex] = useState(1);
   const [questionText, setQuestionText] = useState("Loading question...");
   const [maxScore, setMaxScore] = useState(0);

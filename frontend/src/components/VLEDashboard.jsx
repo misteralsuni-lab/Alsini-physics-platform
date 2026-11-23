@@ -13,7 +13,7 @@ export const DashboardHome = () => (
 
 
 
-const VLEDashboard = ({ session }) => {
+const VLEDashboard = () => {
   return (
     <div className="h-screen w-full flex bg-[#050505] overflow-hidden relative">
       {/* 

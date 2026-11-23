@@ -547,7 +547,7 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
                 </div>
               ) : activeTab === 'Quiz' ? (
                 <div className="w-full h-full">
-                  <QuizEngine resourceId={worksheetResource?.id} activeSpecPointId={activeSpecPointId} />
+                  <QuizEngine resourceId={worksheetResource?.id} />
                 </div>
               ) : (
                 /* Glass Box Placeholder for other tabs */

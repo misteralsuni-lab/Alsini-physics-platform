@@ -224,9 +224,6 @@ test('[A] Click concept sets focus and is consumed by the tutor', async ({ page 
 
   // Switch to Interactive Knowledge mode.
   await page.getByRole('button', { name: 'Interactive Tutor' }).click();
-  const firstConcept = page.locator('button', { hasText: /[A-Za-z]/ }).filter({
-    hasText: /CONCEPT|concept/i,
-  });
   // Click the first concept card (the one rendered with an emerald concept label).
   const conceptCard = page.locator('div').filter({ hasText: /Velocity|Displacement|Speed/ }).first();
   await expect(conceptCard).toBeVisible({ timeout: 10_000 });
