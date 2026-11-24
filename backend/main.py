@@ -21,7 +21,15 @@ app = FastAPI(title="Alsini Physics VLE - AI Tutor API", version="1.0")
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 configured_origins = os.getenv(
     "CORS_ORIGINS",
-    ",".join([frontend_url, "http://localhost:5174", "http://localhost:3000"]),
+    ",".join(
+        [
+            frontend_url,
+            "http://localhost:5174",
+            "http://localhost:3000",
+            "https://eduvle.vercel.app",
+            "https://alsini-physics-platform.vercel.app",
+        ]
+    ),
 )
 allowed_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
 app.add_middleware(
