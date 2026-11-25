@@ -25,3 +25,5 @@ onboarding-video/**/*.mp4
 onboarding-video/**/*.png
 onboarding-video/**/*.log
 !onboarding-video/package.json
+# Local Vercel CLI link/deploy artifacts (repo root, frontend/, and any other subdir)
+.vercel/
