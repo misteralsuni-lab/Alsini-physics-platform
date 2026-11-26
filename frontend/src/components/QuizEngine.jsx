@@ -1,42 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { authenticatedFetch } from '../lib/apiClient';
+import {
+  API_BASE,
+  ApiError,
+  authenticatedFetch,
+  formatApiError,
+  parseApiErrorResponse,
+} from '../lib/apiClient';
 import { Send, Lightbulb, CheckCircle, AlertTriangle, Bot, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 
-// Backend API base URL — sourced from env, falls back to localhost:8000 for dev.
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
 const QuizEngine = ({ resourceId }) => {
   const [questionIndex, setQuestionIndex] = useState(1);
   const [questionText, setQuestionText] = useState("Loading question...");
+  const [questionError, setQuestionError] = useState(null);
   const [maxScore, setMaxScore] = useState(0);
   const [examinerHint, setExaminerHint] = useState("");
   
   const [studentAnswer, setStudentAnswer] = useState('');
   const [isGrading, setIsGrading] = useState(false);
+  const [gradingPhase, setGradingPhase] = useState(null);
   const [correction, setCorrection] = useState(null);
   const [hintVisible, setHintVisible] = useState(false);
+  const gradeAbortRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (gradeAbortRef.current) {
+        gradeAbortRef.current.abort();
+        gradeAbortRef.current = null;
+      }
+    };
+  }, []);
   
   useEffect(() => {
+    const controller = new AbortController();
     const fetchQuestion = async () => {
+      setQuestionError(null);
       try {
-        const response = await authenticatedFetch(`${API_BASE}/api/question?resource_id=${resourceId || ''}`);
-        if (response.ok) {
-          const data = await response.json();
-          setQuestionIndex(data.question_index);
-          setQuestionText(data.question_text);
-          setMaxScore(data.max_score);
-          setExaminerHint(data.examiner_hint);
+        const query = resourceId ? `?resource_id=${encodeURIComponent(resourceId)}` : '';
+        const response = await authenticatedFetch(`${API_BASE}/api/question${query}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw await parseApiErrorResponse(response);
         }
+        const data = await response.json();
+        if (controller.signal.aborted) return;
+        setQuestionIndex(data.question_index);
+        setQuestionText(data.question_text);
+        setMaxScore(data.max_score);
+        setExaminerHint(data.examiner_hint);
       } catch (err) {
-        console.error("Failed to fetch question:", err);
-        setQuestionText("Failed to load question.");
+        if (err?.isAbort || controller.signal.aborted) return;
+        console.error('Failed to fetch question:', err?.status ?? err?.code ?? 'unknown');
+        const formatted = formatApiError(err);
+        setQuestionError(formatted.message);
+        setQuestionText('');
       }
     };
     fetchQuestion();
+    return () => controller.abort();
   }, [resourceId]);
   
   const handleHint = () => {
@@ -44,9 +70,16 @@ const QuizEngine = ({ resourceId }) => {
   };
   
   const handleSubmit = async () => {
-    if (!studentAnswer.trim()) return;
+    if (!studentAnswer.trim() || isGrading) return;
+
+    if (gradeAbortRef.current) {
+      gradeAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    gradeAbortRef.current = controller;
     
     setIsGrading(true);
+    setGradingPhase('sending');
     setCorrection(null);
     setHintVisible(false);
     
@@ -54,13 +87,16 @@ const QuizEngine = ({ resourceId }) => {
       // Get current user session
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user?.id) {
-        throw new Error('An authenticated student session is required for grading.');
+        throw new ApiError(
+          'Session expired or sign-in required (401). Please sign in again to submit answers.',
+          { status: 401, code: 'AUTH_REQUIRED' }
+        );
       }
       const studentId = session.user.id;
       
       const payload = {
         student_id: studentId,
-        resource_id: resourceId,  // Dynamic — passed from the parent based on selected worksheet
+        resource_id: resourceId || null,
         question_index: questionIndex,
         student_answer: studentAnswer,
         max_score: maxScore,
@@ -69,14 +105,21 @@ const QuizEngine = ({ resourceId }) => {
 
       const response = await authenticatedFetch(`${API_BASE}/api/grade`, {
         method: 'POST',
+        signal: controller.signal,
+        onStatusChange: (phase) => {
+          if (!controller.signal.aborted) {
+            setGradingPhase(phase);
+          }
+        },
         body: JSON.stringify(payload)
       });
       
       if (!response.ok) {
-        throw new Error('Grading failed');
+        throw await parseApiErrorResponse(response);
       }
       
       const result = await response.json();
+      if (controller.signal.aborted) return;
       setCorrection(result);
       
       // Save to database
@@ -96,14 +139,21 @@ const QuizEngine = ({ resourceId }) => {
       }
       
     } catch (error) {
-      console.error("Error submitting quiz:", error);
+      if (error?.isAbort || controller.signal.aborted) return;
+      console.error('Error submitting quiz:', error?.status ?? error?.code ?? 'unknown');
+      const formatted = formatApiError(error);
       setCorrection({
         marks_awarded: 0,
         total_marks: maxScore,
-        explanation: "Error contacting the grading engine. Please try again."
+        explanation: formatted.message,
+        isError: true,
       });
     } finally {
-      setIsGrading(false);
+      if (gradeAbortRef.current === controller) {
+        gradeAbortRef.current = null;
+        setIsGrading(false);
+        setGradingPhase(null);
+      }
     }
   };
 
@@ -120,11 +170,17 @@ const QuizEngine = ({ resourceId }) => {
           </span>
         </div>
         
-        <div className="text-gray-300 mb-6 leading-relaxed text-sm md:text-base prose prose-invert prose-emerald max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-            {questionText}
-          </ReactMarkdown>
-        </div>
+        {questionError ? (
+          <div role="alert" className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm whitespace-pre-wrap break-words">
+            {questionError}
+          </div>
+        ) : (
+          <div className="text-gray-300 mb-6 leading-relaxed text-sm md:text-base prose prose-invert prose-emerald max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+              {questionText}
+            </ReactMarkdown>
+          </div>
+        )}
         
         {hintVisible && (
           <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex gap-3 text-amber-200/90 text-sm prose prose-invert prose-emerald max-w-none prose-p:my-0">
@@ -168,7 +224,13 @@ const QuizEngine = ({ resourceId }) => {
                 {isGrading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" /> 
-                    <span>The Examiner is reviewing...</span>
+                    <span>
+                      {gradingPhase === 'retrying'
+                        ? 'Server is waking up — retrying...'
+                        : gradingPhase === 'waking'
+                          ? 'Waking up grading server...'
+                          : 'The Examiner is reviewing...'}
+                    </span>
                   </>
                 ) : (
                   <>
@@ -187,7 +249,7 @@ const QuizEngine = ({ resourceId }) => {
         <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom-4 duration-500">
           <div className="bg-[#050505] p-4 border-b border-white/5 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {correction.marks_awarded === maxScore ? (
+              {!correction.isError && correction.marks_awarded === maxScore ? (
                 <div className="p-1.5 bg-emerald-500/20 rounded-full">
                   <CheckCircle className="w-5 h-5 text-emerald-400" />
                 </div>
@@ -196,11 +258,13 @@ const QuizEngine = ({ resourceId }) => {
                   <AlertTriangle className="w-5 h-5 text-amber-400" />
                 </div>
               )}
-              <h3 className="font-medium font-drama text-white">Examiner's Feedback</h3>
+              <h3 className="font-medium font-drama text-white">
+                {correction.isError ? 'Grading Unavailable' : "Examiner's Feedback"}
+              </h3>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xl font-bold font-mono">
-                <span className={correction.marks_awarded === maxScore ? "text-emerald-400" : "text-amber-400"}>
+                <span className={!correction.isError && correction.marks_awarded === maxScore ? "text-emerald-400" : "text-amber-400"}>
                   {correction.marks_awarded}
                 </span>
                 <span className="text-gray-500">/{correction.total_marks}</span>
@@ -209,11 +273,17 @@ const QuizEngine = ({ resourceId }) => {
           </div>
           
           <div className="p-6">
-            <div className="text-gray-300 leading-relaxed text-sm md:text-base font-light prose prose-invert prose-emerald max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+            {correction.isError ? (
+              <div role="alert" className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm whitespace-pre-wrap break-words">
                 {correction.explanation}
-              </ReactMarkdown>
-            </div>
+              </div>
+            ) : (
+              <div className="text-gray-300 leading-relaxed text-sm md:text-base font-light prose prose-invert prose-emerald max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                  {correction.explanation}
+                </ReactMarkdown>
+              </div>
+            )}
             
             <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-center">
               <div className="bg-[#1a1a1a] border border-white/10 px-3 py-1.5 rounded-full text-[11px] text-gray-400 font-mono flex items-center gap-2 w-max cursor-default hover:bg-[#222] transition-colors">

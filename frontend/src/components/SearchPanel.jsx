@@ -1,9 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Search, Loader2, X, FileText, ArrowUpRight } from 'lucide-react';
-import { authenticatedFetch } from '../lib/apiClient';
-
-// Backend API base URL — sourced from env, falls back to localhost:8000 for dev.
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import {
+  API_BASE,
+  authenticatedFetch,
+  formatApiError,
+  parseApiErrorResponse,
+} from '../lib/apiClient';
 
 /**
  * SearchPanel — Exposes hybrid retrieval to the learner.
@@ -25,9 +27,20 @@ const SearchPanel = ({ resourceId, onNavigate }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState(null);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [filterChunkType, setFilterChunkType] = useState(null); // null = all
+  const searchAbortRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+        searchAbortRef.current = null;
+      }
+    };
+  }, []);
 
   const chunkTypeFilters = [
     { label: 'All', value: null },
@@ -41,7 +54,14 @@ const SearchPanel = ({ resourceId, onNavigate }) => {
     e?.preventDefault();
     if (!query.trim()) return;
 
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+
     setIsLoading(true);
+    setLoadingPhase('sending');
     setError(null);
     setHasSearched(true);
 
@@ -55,21 +75,34 @@ const SearchPanel = ({ resourceId, onNavigate }) => {
 
       const resp = await authenticatedFetch(`${API_BASE}/api/search/hybrid`, {
         method: 'POST',
+        signal: controller.signal,
+        onStatusChange: (phase) => {
+          if (!controller.signal.aborted) {
+            setLoadingPhase(phase);
+          }
+        },
         body: JSON.stringify(body),
       });
 
       if (!resp.ok) {
-        throw new Error(`Search failed (${resp.status})`);
+        throw await parseApiErrorResponse(resp);
       }
 
       const data = await resp.json();
-      setResults(data.results || []);
+      if (controller.signal.aborted) return;
+      setResults(Array.isArray(data?.results) ? data.results : []);
     } catch (err) {
-      console.error('[SearchPanel] Error:', err);
-      setError(err.message || 'Search failed. Is the backend running?');
+      if (err?.isAbort || controller.signal.aborted) return;
+      console.error('[SearchPanel] Search failed:', err?.status ?? err?.code ?? 'unknown');
+      const formatted = formatApiError(err);
+      setError(formatted.message);
       setResults([]);
     } finally {
-      setIsLoading(false);
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+        setIsLoading(false);
+        setLoadingPhase(null);
+      }
     }
   }, [query, resourceId, filterChunkType]);
 
@@ -136,13 +169,20 @@ const SearchPanel = ({ resourceId, onNavigate }) => {
       {/* Results */}
       <div className="flex-1 overflow-y-auto styled-scrollbar p-3 space-y-2">
         {isLoading && (
-          <div className="flex items-center justify-center py-8">
+          <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
             <Loader2 className="w-5 h-5 text-emerald-500 animate-spin" />
+            {(loadingPhase === 'waking' || loadingPhase === 'retrying') && (
+              <p role="status" aria-live="polite" className="text-[11px] text-amber-300/80 px-2">
+                {loadingPhase === 'retrying'
+                  ? 'Server is waking up — retrying search...'
+                  : 'Waking up search server (first request may take ~30s)...'}
+              </p>
+            )}
           </div>
         )}
 
         {error && (
-          <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20 text-red-400/80 text-xs">
+          <div role="alert" className="p-3 rounded-lg bg-red-500/5 border border-red-500/20 text-red-400/90 text-xs whitespace-pre-wrap break-words">
             {error}
           </div>
         )}

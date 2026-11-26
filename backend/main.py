@@ -1,52 +1,155 @@
-import os
-import requests
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
-from dotenv import load_dotenv
-from openai import OpenAI
-import google.generativeai as genai
-from typing import List, Optional
 import json
+import logging
+import os
 import re
+import uuid
+from typing import List, Optional
+
+import google.generativeai as genai
+import requests
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from openai import OpenAI
+from pydantic import BaseModel, Field
+
 # Load environment variables
 load_dotenv()
+
+logger = logging.getLogger("alsini.backend")
 
 # Initialize FastAPI
 app = FastAPI(title="Alsini Physics VLE - AI Tutor API", version="1.0")
 
+
+def _env_str(name: str, default: str = "") -> str:
+    """Return a trimmed environment variable string or default if unset/blank."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    stripped = value.strip()
+    return stripped if stripped else default
+
+
+def _env_float(name: str, default: float, min_val: float, max_val: float) -> float:
+    """Parse a bounded float environment variable safely."""
+    raw = _env_str(name)
+    if not raw:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    return max(min_val, min(max_val, parsed))
+
+
+# Environment Variables
+GEMINI_API_KEY = _env_str("GEMINI_API_KEY") or None
+NVIDIA_API_KEY = _env_str("NVIDIA_API_KEY") or None
+OPENCODE_ZEN_API_KEY = _env_str("OPENCODE_ZEN_API_KEY") or None
+SUPABASE_URL = _env_str("SUPABASE_URL").rstrip("/") or None
+SUPABASE_KEY = _env_str("SUPABASE_SERVICE_ROLE_KEY") or _env_str("SUPABASE_SERVICE_KEY") or None
+SUPABASE_ANON_KEY = _env_str("SUPABASE_ANON_KEY") or None
+
+OPENCODE_ZEN_MODEL = _env_str("OPENCODE_ZEN_MODEL", "deepseek-v4.1-flash-free")
+NVIDIA_CHAT_MODEL = _env_str("NVIDIA_CHAT_MODEL", "nvidia/nemotron-3.5-super-vl-120b-a12b")
+NVIDIA_FALLBACK_CHAT_MODEL = _env_str("NVIDIA_FALLBACK_CHAT_MODEL", "nvidia/nemotron-3.5-bolt-e4b")
+GEMINI_CHAT_MODEL = _env_str("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
+EMBED_MODEL = _env_str("NVIDIA_EMBED_MODEL", "nvidia/nemotron-3.5-embed-1b")
+EMBED_DIM = 1024
+LLM_TIMEOUT_SECONDS = _env_float("LLM_TIMEOUT_SECONDS", 30.0, 5.0, 90.0)
+
+
+def _sanitize_error_text(exc: Exception) -> str:
+    """Return a secret-redacted short description suitable for server logs."""
+    msg = str(exc)
+    for secret in (GEMINI_API_KEY, NVIDIA_API_KEY, OPENCODE_ZEN_API_KEY, SUPABASE_KEY, SUPABASE_ANON_KEY):
+        if secret:
+            msg = msg.replace(secret, "[REDACTED]")
+    msg = re.sub(r"(Bearer\s+)[A-Za-z0-9._-]+", r"\1[REDACTED]", msg, flags=re.IGNORECASE)
+    msg = re.sub(r"([?&]key=)[^&\s]+", r"\1[REDACTED]", msg, flags=re.IGNORECASE)
+    return f"{type(exc).__name__}: {msg[:180]}" if msg else type(exc).__name__
+
+
+def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[str]:
+    """Validate and normalize an optional UUID string; empty strings become None."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    try:
+        return str(uuid.UUID(cleaned))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name} format.") from exc
+
+
+def _validate_asset_type(value: str) -> str:
+    """Validate asset_type against a safe identifier allowlist."""
+    cleaned = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,50}", cleaned):
+        raise HTTPException(status_code=400, detail="Invalid asset_type.")
+    return cleaned
+
+
+def _safe_json_list(resp: requests.Response) -> list[dict]:
+    """Parse a PostgREST JSON array response safely without raising ValueError."""
+    try:
+        data = resp.json()
+    except ValueError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+# Register the inner error-catching middleware BEFORE CORSMiddleware so any
+# unexpected error returns JSON inside CORSMiddleware (preserving CORS headers
+# and never leaking Python stack traces).
+@app.middleware("http")
+async def safe_error_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.error(
+            "Unhandled error on %s %s: %s",
+            request.method,
+            request.url.path,
+            _sanitize_error_text(exc),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An internal server error occurred."},
+        )
+
+
 # Configure CORS for the known frontend origins. The API carries privileged
 # server-side credentials, so wildcard origins are intentionally not allowed.
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-configured_origins = os.getenv(
-    "CORS_ORIGINS",
-    ",".join(
-        [
-            frontend_url,
-            "http://localhost:5174",
-            "http://localhost:3000",
-            "https://eduvle.vercel.app",
-            "https://alsini-physics-platform.vercel.app",
-        ]
-    ),
-)
-allowed_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+frontend_url = _env_str("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+default_origins = [
+    frontend_url,
+    "http://localhost:5174",
+    "http://localhost:3000",
+    "https://eduvle.vercel.app",
+    "https://alsini-physics-platform.vercel.app",
+]
+configured_origins_raw = _env_str("CORS_ORIGINS")
+raw_origin_list = configured_origins_raw.split(",") if configured_origins_raw else default_origins
+allowed_origins: list[str] = []
+for origin in raw_origin_list:
+    normalized = origin.strip().rstrip("/")
+    if not normalized or normalized == "*":
+        continue
+    if normalized not in allowed_origins:
+        allowed_origins.append(normalized)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
-
-# Environment Variables
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-OPENCODE_ZEN_API_KEY = os.getenv("OPENCODE_ZEN_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
 # The browser must present a Supabase access token before any /api route can
 # use the service-role-backed data and LLM clients. Token validation is
@@ -62,17 +165,33 @@ def get_current_user(
     if not SUPABASE_URL or not (SUPABASE_ANON_KEY or SUPABASE_KEY):
         raise HTTPException(status_code=503, detail="Authentication service is not configured.")
 
+    token = (credentials.credentials or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="A valid Supabase access token is required.")
+
     try:
         response = requests.get(
             f"{SUPABASE_URL}/auth/v1/user",
             headers={
                 "apikey": SUPABASE_ANON_KEY or SUPABASE_KEY,
-                "Authorization": f"Bearer {credentials.credentials}",
+                "Authorization": f"Bearer {token}",
             },
             timeout=10,
         )
     except requests.RequestException as exc:
+        logger.warning("Auth service request error: %s", _sanitize_error_text(exc))
         raise HTTPException(status_code=503, detail="Authentication service is unavailable.") from exc
+
+    if response.status_code in (401, 403):
+        body_lower = (response.text or "")[:300].lower()
+        if "invalid api key" in body_lower or "no api key" in body_lower:
+            logger.error("Supabase auth rejected server apikey (status %s).", response.status_code)
+            raise HTTPException(status_code=503, detail="Authentication service configuration error.")
+        raise HTTPException(status_code=401, detail="A valid Supabase access token is required.")
+
+    if response.status_code == 404 or response.status_code == 429 or response.status_code >= 500:
+        logger.warning("Supabase auth upstream returned status %s.", response.status_code)
+        raise HTTPException(status_code=503, detail="Authentication service is unavailable.")
 
     if response.status_code != 200:
         raise HTTPException(status_code=401, detail="A valid Supabase access token is required.")
@@ -80,25 +199,30 @@ def get_current_user(
     try:
         user = response.json()
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail="Authentication service returned an invalid user.") from exc
+        logger.warning("Supabase auth returned non-JSON body on 200 OK.")
+        raise HTTPException(status_code=503, detail="Authentication service returned an invalid response.") from exc
 
     if not isinstance(user, dict) or not user.get("id"):
         raise HTTPException(status_code=401, detail="Authentication service returned no user identity.")
     return user
 
 
-# Initialize APIs
+# Initialize APIs (max_retries=0 so multi-tier fallback does not multiply latency)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 nvidia_client = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
-    api_key=NVIDIA_API_KEY
+    api_key=NVIDIA_API_KEY,
+    timeout=LLM_TIMEOUT_SECONDS,
+    max_retries=0,
 ) if NVIDIA_API_KEY else None
 
 opencode_zen_client = OpenAI(
     base_url="https://opencode.ai/zen/v1",
-    api_key=OPENCODE_ZEN_API_KEY
+    api_key=OPENCODE_ZEN_API_KEY,
+    timeout=LLM_TIMEOUT_SECONDS,
+    max_retries=0,
 ) if OPENCODE_ZEN_API_KEY else None
 
 # Pydantic Models for Request Validation
@@ -138,7 +262,7 @@ class LearningContext(BaseModel):
 
 class TutorRequest(BaseModel):
     student_prompt: str
-    history: Optional[List[Message]] = []
+    history: Optional[List[Message]] = Field(default_factory=list)
     # Dynamic RAG scope — the frontend passes the currently selected
     # worksheet's resource_id so retrieval is scoped to it. If absent,
     # retrieval runs unscoped (returns chunks across all resources).
@@ -175,7 +299,7 @@ class TutorResponse(BaseModel):
 
 class GradeRequest(BaseModel):
     student_id: str
-    resource_id: str
+    resource_id: Optional[str] = None
     question_index: int
     student_answer: str
     max_score: int
@@ -193,10 +317,126 @@ class GradeResponse(BaseModel):
 # from the frontend. Do NOT add new uses of this constant.
 TARGET_RESOURCE_ID = "5729d034-a6c7-4f35-b81c-fcac447289c7" # Forces and Motion Resource
 TUTOR_CHUNK_COUNT = 5  # top-N chunks to inject as RAG context
+VECTOR_MIN_RELEVANCE = 0.15  # guard against cross-embedding-space cosine noise
+_LEXICAL_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "could",
+    "describe", "do", "does", "explain", "for", "from", "hello", "help",
+    "hey", "hi", "how", "in", "is", "it", "me", "my", "of", "on", "or",
+    "please", "tell", "thanks", "thank", "that", "the", "this", "to",
+    "what", "when", "where", "which", "who", "why", "with", "would",
+    "you", "your",
+})
 
 # -------------------------------------------------------------------
 # RAG Retrieval Helpers (reuse existing _embed_query and _supabase_headers)
 # -------------------------------------------------------------------
+
+
+def _tokenize_search_query(query: str) -> list[str]:
+    """Extract meaningful lowercase tokens for lexical chunk matching."""
+    raw_tokens = re.findall(r"[a-z0-9]+", (query or "").lower())
+    tokens: list[str] = []
+    for idx, tok in enumerate(raw_tokens):
+        if tok in _LEXICAL_STOPWORDS:
+            continue
+        if len(tok) >= 2:
+            tokens.append(tok)
+        elif idx > 0 and raw_tokens[idx - 1] == "question" and tok.isdigit():
+            tokens.append(f"q{tok}")
+    # Deduplicate while preserving order
+    return list(dict.fromkeys(tokens))
+
+
+def _lexical_search_chunks(
+    query: str,
+    match_count: int = 10,
+    resource_id: Optional[str] = None,
+    chunk_type: Optional[str] = None,
+    resource_ids: Optional[list[str]] = None,
+) -> tuple[list[dict], bool]:
+    """
+    Fallback lexical/relational retrieval over `resource_chunks` via PostgREST.
+
+    Used when vector embedding fails (e.g. upstream provider outage/EOL) or
+    when stored vectors do not align with the active embedding model space.
+    Returns (ranked_chunks, supabase_reachable).
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return [], False
+
+    tokens = _tokenize_search_query(query)
+    if not tokens:
+        return [], True
+
+    params: dict[str, str] = {
+        "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+        "order": "chunk_index.asc",
+        "limit": "200",
+    }
+    if resource_id:
+        params["resource_id"] = f"eq.{resource_id}"
+    elif resource_ids:
+        params["resource_id"] = f"in.({','.join(resource_ids)})"
+    if chunk_type:
+        params["chunk_type"] = f"eq.{chunk_type}"
+
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/resource_chunks",
+            headers=_supabase_headers(),
+            params=params,
+            timeout=12,
+        )
+    except (requests.RequestException, HTTPException) as exc:
+        logger.warning("[RAG] Lexical chunk fetch error: %s", _sanitize_error_text(exc))
+        return [], False
+
+    if resp.status_code != 200:
+        logger.warning("[RAG] Lexical chunk fetch returned status %s.", resp.status_code)
+        return [], False
+
+    rows = _safe_json_list(resp)
+    query_lower = query.strip().lower()
+    scored: list[dict] = []
+
+    def _token_matches(tok: str, word_set: set[str]) -> bool:
+        if tok in word_set:
+            return True
+        if len(tok) >= 4:
+            return any(w.startswith(tok) for w in word_set)
+        return False
+
+    for row in rows:
+        chunk_text = row.get("chunk_text") or ""
+        text_lower = chunk_text.lower()
+        text_words = set(re.findall(r"[a-z0-9]+", text_lower))
+        source_refs = row.get("source_refs") or {}
+        concept_lower = str(source_refs.get("concept") or "").lower()
+        concept_words = set(re.findall(r"[a-z0-9]+", concept_lower))
+
+        text_hits = sum(1 for tok in tokens if _token_matches(tok, text_words))
+        concept_hits = sum(1 for tok in tokens if _token_matches(tok, concept_words))
+        if text_hits == 0 and concept_hits == 0:
+            continue
+
+        score = (
+            0.40
+            + 0.35 * (text_hits / len(tokens))
+            + 0.15 * (concept_hits / len(tokens))
+        )
+        if len(query_lower) >= 3 and query_lower in text_lower:
+            score += 0.05
+
+        item = dict(row)
+        item["similarity"] = min(0.95, round(score, 4))
+        scored.append(item)
+
+    scored.sort(
+        key=lambda c: (c.get("similarity") or 0.0, -(c.get("chunk_index") or 0)),
+        reverse=True,
+    )
+    return scored[:match_count], True
+
 
 def _retrieve_relevant_chunks(
     query: str,
@@ -205,11 +445,11 @@ def _retrieve_relevant_chunks(
 ) -> list[dict]:
     """
     Embed the student's question, call match_resource_chunks RPC, and
-    return ranked chunks for RAG context.
+    return ranked chunks for RAG context. Falls back to lexical PostgREST
+    retrieval if vector search fails or returns cross-model noise.
 
     Retrieval scope is dynamic:
-      - If `resource_id` is provided, the RPC's `filter_resource_id`
-        parameter is set to it so chunks are scoped to the CURRENTLY
+      - If `resource_id` is provided, retrieval is scoped to the CURRENTLY
         SELECTED worksheet only (dynamic tutor scope).
       - If `resource_id` is None, retrieval is unscoped (returns chunks
         across all resources) — used as a fallback when the frontend
@@ -218,46 +458,63 @@ def _retrieve_relevant_chunks(
     Returns empty list on any failure (non-fatal — tutor still works).
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("[RAG] Supabase credentials not configured — skipping retrieval.")
-        return []
-    if not nvidia_client:
-        print("[RAG] NVIDIA API not configured — skipping embedding.")
+        logger.warning("[RAG] Supabase credentials not configured — skipping retrieval.")
         return []
 
-    try:
-        query_vec = _embed_query(query)
-        vec_str = _vector_to_pg_str(query_vec)
+    vector_chunks: list[dict] = []
+    if nvidia_client:
+        try:
+            query_vec = _embed_query(query)
+            vec_str = _vector_to_pg_str(query_vec)
 
-        headers = _supabase_headers()
-        rpc_body = {
-            "query_embedding": vec_str,
-            "match_count": min(match_count, 10),
-        }
-        # Dynamic RAG scope: filter by the frontend-supplied resource_id
-        # if present. This is the root-cause fix for the "tutor always
-        # answers from Unit 1 / Forces and Motion" bug — retrieval is now
-        # scoped to whatever worksheet the student is viewing.
-        if resource_id:
-            rpc_body["filter_resource_id"] = resource_id
+            headers = _supabase_headers()
+            rpc_body = {
+                "query_embedding": vec_str,
+                "match_count": min(match_count, 10),
+            }
+            # Dynamic RAG scope: filter by the frontend-supplied resource_id
+            # if present. This is the root-cause fix for the "tutor always
+            # answers from Unit 1 / Forces and Motion" bug — retrieval is now
+            # scoped to whatever worksheet the student is viewing.
+            if resource_id:
+                rpc_body["filter_resource_id"] = resource_id
 
-        resp = requests.post(
-            f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
-            headers=headers,
-            json=rpc_body,
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            print(f"[RAG] RPC failed ({resp.status_code}): {resp.text[:120]}")
-            return []
-        chunks = resp.json()
-        # Attach resource_id onto each chunk for traceability in TutorSource.
-        if resource_id:
-            for c in chunks:
-                c.setdefault("resource_id", resource_id)
-        return chunks
-    except Exception as e:
-        print(f"[RAG] Retrieval error (non-fatal): {e}")
-        return []
+            resp = requests.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
+                headers=headers,
+                json=rpc_body,
+                timeout=12,
+            )
+            if resp.status_code == 200:
+                vector_chunks = _safe_json_list(resp)
+                if resource_id:
+                    for c in vector_chunks:
+                        c.setdefault("resource_id", resource_id)
+            else:
+                logger.warning("[RAG] Vector RPC failed with status %s.", resp.status_code)
+        except (HTTPException, Exception) as exc:
+            logger.warning("[RAG] Vector retrieval error (non-fatal): %s", _sanitize_error_text(exc))
+    else:
+        logger.warning("[RAG] NVIDIA API not configured — using lexical retrieval fallback.")
+
+    max_vector_sim = max(
+        (c.get("similarity") or 0.0 for c in vector_chunks),
+        default=0.0,
+    )
+    if vector_chunks and max_vector_sim >= VECTOR_MIN_RELEVANCE:
+        return vector_chunks[:match_count]
+
+    lexical_chunks, _ = _lexical_search_chunks(
+        query,
+        match_count=match_count,
+        resource_id=resource_id,
+    )
+    if lexical_chunks:
+        return lexical_chunks
+
+    # If lexical found nothing (e.g., conversational greeting), avoid injecting
+    # cross-model noise (< VECTOR_MIN_RELEVANCE) into the tutor prompt.
+    return []
 
 
 def _format_chunks_as_context(chunks: list[dict]) -> str:
@@ -272,7 +529,6 @@ def _format_chunks_as_context(chunks: list[dict]) -> str:
         sources = c.get("source_refs", {}) or {}
         concept = sources.get("concept", "")
         page = sources.get("page")
-        sim = c.get("similarity")
 
         # Build a tight citation suffix
         cite_parts = []
@@ -290,7 +546,7 @@ def _chunks_to_sources(chunks: list[dict]) -> list[TutorSource]:
     """Extract source metadata from retrieved chunks for the response."""
     return [
         TutorSource(
-            chunk_id=c.get("id", ""),
+            chunk_id=str(c.get("id", "")),
             concept=(c.get("source_refs") or {}).get("concept"),
             page=(c.get("source_refs") or {}).get("page"),
             chunk_type=c.get("chunk_type", "concept"),
@@ -387,9 +643,10 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
     if not SUPABASE_URL or not SUPABASE_KEY:
         return []
 
-    resource_id = learning_context.resource_id
+    resource_id = _normalize_optional_uuid(learning_context.resource_id, "learning_context.resource_id")
+    focused_asset = _normalize_optional_uuid(learning_context.focused_asset, "learning_context.focused_asset")
     page = learning_context.page
-    if not resource_id:
+    if not resource_id or not focused_asset:
         return []
 
     headers = _supabase_headers()
@@ -425,7 +682,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
             asset_endpoint,
             headers=headers,
             params={
-                "id": f"eq.{learning_context.focused_asset}",
+                "id": f"eq.{focused_asset}",
                 "resource_id": f"eq.{resource_id}",
                 "select": "id,resource_id,page_number,asset_type,storage_url,caption,linked_question_id,metadata",
                 "limit": "1",
@@ -434,7 +691,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         )
         if ar.status_code != 200:
             raise HTTPException(status_code=502, detail="Unable to verify the focused asset.")
-        rows = ar.json()
+        rows = _safe_json_list(ar)
         if not rows:
             raise HTTPException(
                 status_code=400,
@@ -449,6 +706,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         page = a.get("page_number") if a.get("page_number") is not None else page
         asset_row = a
     except requests.RequestException as exc:
+        logger.warning("Asset verification request error: %s", _sanitize_error_text(exc))
         raise HTTPException(status_code=503, detail="Asset verification service is unavailable.") from exc
 
     # Compute the canonical citation label from the verified asset row.
@@ -468,7 +726,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
                 timeout=10,
             )
             if ordered.status_code == 200:
-                assets_list = ordered.json()
+                assets_list = _safe_json_list(ordered)
                 page_counter: dict[int, int] = {}
                 for item in assets_list:
                     pn = item.get("page_number")
@@ -494,7 +752,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
                 headers=headers,
                 params={
                     "resource_id": f"eq.{resource_id}",
-                    "source_refs->>page": f"eq.{page}",
+                    "source_refs->>page": f"eq.{int(page)}",
                     "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
                     "order": "chunk_index.asc",
                     "limit": "50",
@@ -502,10 +760,11 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
                 timeout=12,
             )
             if pr.status_code == 200:
-                for c in pr.json():
+                for c in _safe_json_list(pr):
                     c.setdefault("resource_id", resource_id)
                     _append_chunk(c)
         except requests.RequestException as exc:
+            logger.warning("Page grounding request error: %s", _sanitize_error_text(exc))
             raise HTTPException(status_code=503, detail="Page grounding service is unavailable.") from exc
 
     # 3. Linked worksheet question chunk (asset -> question id -> chunk).
@@ -525,7 +784,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
                 timeout=12,
             )
             if qr.status_code == 200:
-                for c in qr.json():
+                for c in _safe_json_list(qr):
                     sr = c.get("source_refs") or {}
                     if str(sr.get("question_id", "")).strip() == qid:
                         c.setdefault("resource_id", resource_id)
@@ -548,11 +807,16 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         metadata = (asset_row or {}).get("metadata") or {}
         if isinstance(metadata, str):
             try:
-                import json as _json
-                metadata = _json.loads(metadata)
+                metadata = json.loads(metadata)
             except (ValueError, TypeError):
                 metadata = {}
-        linked_formula_chunk_id = metadata.get("linked_formula_chunk_id") if isinstance(metadata, dict) else None
+        raw_formula_id = metadata.get("linked_formula_chunk_id") if isinstance(metadata, dict) else None
+        linked_formula_chunk_id = None
+        if raw_formula_id:
+            try:
+                linked_formula_chunk_id = str(uuid.UUID(str(raw_formula_id).strip()))
+            except ValueError:
+                linked_formula_chunk_id = None
         if linked_formula_chunk_id:
             # Retrieve ONLY the explicitly linked formula chunk.
             eq_endpoint = f"{SUPABASE_URL}/rest/v1/resource_chunks"
@@ -569,7 +833,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
                     timeout=12,
                 )
                 if er.status_code == 200:
-                    for c in er.json():
+                    for c in _safe_json_list(er):
                         c.setdefault("resource_id", resource_id)
                         _append_chunk(c)
             except requests.RequestException:
@@ -586,7 +850,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
     #    value generated above, never the client-supplied label.
     if asset_caption or asset_type:
         grounded.insert(0, {
-            "id": f"asset:{learning_context.focused_asset}",
+            "id": f"asset:{focused_asset}",
             "resource_id": resource_id,
             "chunk_index": -1,
             "chunk_text": asset_caption or f"{asset_type or 'asset'} on page {page}",
@@ -600,6 +864,7 @@ def _ground_focused_asset(learning_context: "LearningContext") -> list[dict]:
         })
 
     return grounded
+
 
 def _enrich_chunks_with_resource_meta(chunks: list[dict], resource_id: Optional[str]) -> None:
     """
@@ -615,7 +880,6 @@ def _enrich_chunks_with_resource_meta(chunks: list[dict], resource_id: Optional[
     if not chunks or not SUPABASE_URL or not SUPABASE_KEY:
         return
 
-    headers = None
     title: Optional[str] = None
     spec_by_id: dict[str, tuple[str, str]] = {}
 
@@ -627,18 +891,23 @@ def _enrich_chunks_with_resource_meta(chunks: list[dict], resource_id: Optional[
     # 1. Resolve the resource title — single GET.
     if resource_id:
         try:
-            r_ep = (
-                f"{SUPABASE_URL}/rest/v1/resources"
-                f"?id=eq.{resource_id}&select=id,title,specification_point_id"
+            r_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/resources",
+                headers=headers,
+                params={
+                    "id": f"eq.{resource_id}",
+                    "select": "id,title,specification_point_id",
+                },
+                timeout=10,
             )
-            r_resp = requests.get(r_ep, headers=headers, timeout=10)
-            if r_resp.status_code == 200 and r_resp.json():
-                row = r_resp.json()[0]
+            rows = _safe_json_list(r_resp) if r_resp.status_code == 200 else []
+            if rows:
+                row = rows[0]
                 title = row.get("title")
                 spec_pt_id = row.get("specification_point_id")
                 # Pre-populate the spec cache if the resource carries one.
                 if spec_pt_id:
-                    spec_by_id.setdefault(spec_pt_id, (spec_pt_id, ""))
+                    spec_by_id.setdefault(str(spec_pt_id), (str(spec_pt_id), ""))
         except requests.RequestException:
             pass
 
@@ -648,21 +917,28 @@ def _enrich_chunks_with_resource_meta(chunks: list[dict], resource_id: Optional[
     for c in chunks:
         sid = c.get("specification_point_id") or (c.get("source_refs") or {}).get("spec_point_id")
         if sid:
-            spec_ids_to_resolve.add(str(sid))
+            try:
+                spec_ids_to_resolve.add(str(uuid.UUID(str(sid).strip())))
+            except ValueError:
+                continue
     if spec_ids_to_resolve:
         id_filter = ",".join(sorted(spec_ids_to_resolve))
-        sp_ep = (
-            f"{SUPABASE_URL}/rest/v1/specification_points"
-            f"?id=in.({id_filter})&select=id,reference_code,description"
-        )
         try:
-            sp_resp = requests.get(sp_ep, headers=headers, timeout=10)
+            sp_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/specification_points",
+                headers=headers,
+                params={
+                    "id": f"in.({id_filter})",
+                    "select": "id,reference_code,description",
+                },
+                timeout=10,
+            )
             if sp_resp.status_code == 200:
-                for row in sp_resp.json():
+                for row in _safe_json_list(sp_resp):
                     rid = str(row.get("id"))
                     ref = row.get("reference_code") or ""
                     desc = row.get("description") or ""
-                    spec_by_id[rid] = (rid, f"{ref}: {desc}" if ref or desc else ref or desc)
+                    spec_by_id[rid] = (rid, f"{ref}: {desc}" if ref and desc else ref or desc)
         except requests.RequestException:
             pass
 
@@ -688,94 +964,240 @@ def fetch_forces_and_motion_data():
     still requires full-spec grading context.
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("Warning: Supabase credentials not found.")
+        logger.warning("Supabase credentials not configured for grading context.")
         return None
-        
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json"
-    }
-    endpoint = f"{SUPABASE_URL}/rest/v1/resources?id=eq.{TARGET_RESOURCE_ID}&select=content"
-    
+
     try:
-        response = requests.get(endpoint, headers=headers)
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/resources",
+            headers=_supabase_headers(),
+            params={"id": f"eq.{TARGET_RESOURCE_ID}", "select": "content"},
+            timeout=15,
+        )
         if response.status_code == 200:
-            data = response.json()
-            if data and len(data) > 0:
+            data = _safe_json_list(response)
+            if data:
                 return data[0].get("content")
-    except Exception as e:
-        print(f"Error fetching Supabase data: {e}")
-    
+    except (requests.RequestException, HTTPException) as exc:
+        logger.warning("Error fetching Supabase grading context: %s", _sanitize_error_text(exc))
+
     return None
+
+
+def _model_tag(model_name: str) -> str:
+    """Normalize a model identifier into a compact uppercase badge tag."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", (model_name or "").upper()).strip("_")
+
 
 # Semantic Router Logic
 def evaluate_routing(prompt: str) -> str:
-    """
-    Routes all queries to OpenCode Zen (primary) with NVIDIA as fallback.
-    Gemini is removed due to quota limits — all traffic goes through OpenCode Zen.
-    """
+    """Return the highest-priority configured LLM provider name."""
     if opencode_zen_client:
-        print("Semantic Router: Routing to OPENCODE_ZEN")
         return "OPENCODE_ZEN"
     if nvidia_client:
-        print("Semantic Router: Routing to NVIDIA")
         return "NVIDIA"
-    return "GEMINI"
+    if GEMINI_API_KEY:
+        return "GEMINI"
+    return "NONE"
 
 
-def _call_opencode_zen(messages: list, system_prompt: str) -> tuple[str, str]:
+def _build_chat_messages(history: Optional[List[Message]], user_prompt: str) -> list[dict]:
+    """Convert chat history + current prompt into OpenAI-style chat messages."""
+    messages: list[dict] = []
+    for msg in history or []:
+        content = (msg.content or "").strip()
+        if not content:
+            continue
+        messages.append({
+            "role": "user" if msg.role == "user" else "assistant",
+            "content": content,
+        })
+    messages.append({"role": "user", "content": user_prompt})
+    return messages
+
+
+def _call_opencode_zen(
+    messages: list,
+    system_prompt: str,
+    *,
+    temperature: float = 0.2,
+    max_tokens: int = 4096,
+) -> tuple[str, str]:
     full_messages = [{"role": "system", "content": system_prompt}] + messages
-
     response = opencode_zen_client.chat.completions.create(
-        model="deepseek-v4-flash-free",
+        model=OPENCODE_ZEN_MODEL,
         messages=full_messages,
-        temperature=0.2,
-        max_tokens=4096,
-        timeout=120,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=LLM_TIMEOUT_SECONDS,
     )
-    content = response.choices[0].message.content
+    content = (response.choices[0].message.content or "").strip()
     if not content:
-        raise HTTPException(status_code=502, detail="OpenCode Zen returned empty response")
-    return content, "OPENCODE_ZEN_DEEPSEEK_V4_FLASH_FREE"
+        raise RuntimeError("OpenCode Zen returned empty response")
+    return content, f"OPENCODE_ZEN_{_model_tag(OPENCODE_ZEN_MODEL)}"
 
 
-def _call_nvidia(messages: list, system_prompt: str) -> tuple[str, str]:
+def _call_nvidia(
+    messages: list,
+    system_prompt: str,
+    *,
+    temperature: float = 0.2,
+    max_tokens: int = 4096,
+) -> tuple[str, str]:
     full_messages = [{"role": "system", "content": system_prompt}] + messages
+    candidate_models = list(dict.fromkeys([NVIDIA_CHAT_MODEL, NVIDIA_FALLBACK_CHAT_MODEL]))
+    last_exc: Optional[Exception] = None
 
-    response = nvidia_client.chat.completions.create(
-        model="nvidia/nemotron-3-super-120b-a12b",
-        messages=full_messages,
-        temperature=0.2,
-        max_tokens=4096,
-        timeout=120,
+    for model_name in candidate_models:
+        if not model_name:
+            continue
+        try:
+            response = nvidia_client.chat.completions.create(
+                model=model_name,
+                messages=full_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=LLM_TIMEOUT_SECONDS,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            if not content:
+                raise RuntimeError(f"NVIDIA model {model_name} returned empty response")
+            return content, _model_tag(model_name)
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "NVIDIA model %s failed (%s); trying next NVIDIA model if available.",
+                model_name,
+                _sanitize_error_text(exc),
+            )
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("No NVIDIA chat model configured")
+
+
+def _call_gemini(
+    history: Optional[List[Message]],
+    user_prompt: str,
+    system_prompt: str,
+    *,
+    temperature: float = 0.2,
+) -> tuple[str, str]:
+    gemini_history = []
+    for msg in history or []:
+        content = (msg.content or "").strip()
+        if not content:
+            continue
+        role = "user" if msg.role == "user" else "model"
+        gemini_history.append({"role": role, "parts": [{"text": content}]})
+
+    local_model = genai.GenerativeModel(
+        GEMINI_CHAT_MODEL,
+        system_instruction=system_prompt,
+        generation_config={"temperature": temperature},
     )
-    content = response.choices[0].message.content
-    if not content:
-        raise HTTPException(status_code=502, detail="NVIDIA returned empty response")
-    return content, "NVIDIA_NEMOTRON_3_SUPER_120B"
+    chat = local_model.start_chat(history=gemini_history)
+    result = chat.send_message(
+        user_prompt,
+        request_options={"timeout": LLM_TIMEOUT_SECONDS},
+    )
+    try:
+        reply_text = (result.text or "").strip()
+    except ValueError as exc:
+        raise RuntimeError("Gemini response had no text content") from exc
+    if not reply_text:
+        raise RuntimeError("Gemini returned empty response")
+    return reply_text, "GEMINI_FLASH"
+
+
+def _call_llm_with_fallback(
+    history: Optional[List[Message]],
+    user_prompt: str,
+    system_prompt: str,
+    *,
+    temperature: float = 0.2,
+    max_tokens: int = 4096,
+    validator=None,
+):
+    """
+    Execute an LLM request across configured providers in strict priority order:
+    OpenCode Zen -> NVIDIA NIM -> Gemini 2.5 Flash.
+
+    Never leaks raw upstream error details or keys to the caller.
+    """
+    providers: list[str] = []
+    if opencode_zen_client:
+        providers.append("OPENCODE_ZEN")
+    if nvidia_client:
+        providers.append("NVIDIA")
+    if GEMINI_API_KEY:
+        providers.append("GEMINI")
+
+    if not providers:
+        raise HTTPException(status_code=503, detail="AI service is not configured.")
+
+    messages = _build_chat_messages(history, user_prompt)
+
+    for provider in providers:
+        try:
+            if provider == "OPENCODE_ZEN":
+                raw_reply, model_used = _call_opencode_zen(
+                    messages, system_prompt, temperature=temperature, max_tokens=max_tokens
+                )
+            elif provider == "NVIDIA":
+                raw_reply, model_used = _call_nvidia(
+                    messages, system_prompt, temperature=temperature, max_tokens=max_tokens
+                )
+            else:
+                raw_reply, model_used = _call_gemini(
+                    history, user_prompt, system_prompt, temperature=temperature
+                )
+
+            if validator is not None:
+                return validator(raw_reply), model_used
+            return raw_reply, model_used
+        except Exception as exc:
+            logger.warning(
+                "LLM provider %s failed (%s); falling back if another provider is available.",
+                provider,
+                _sanitize_error_text(exc),
+            )
+
+    raise HTTPException(
+        status_code=502,
+        detail="AI service is temporarily unavailable. Please try again shortly.",
+    )
+
 
 @app.post("/api/tutor", response_model=TutorResponse)
-async def tutor_endpoint(
+def tutor_endpoint(
     request: TutorRequest,
     _user: dict = Depends(get_current_user),
 ):
-    if not request.student_prompt:
+    student_prompt = (request.student_prompt or "").strip()
+    if not student_prompt:
         raise HTTPException(status_code=400, detail="student_prompt is required.")
+    if len(student_prompt) > 16000:
+        raise HTTPException(status_code=400, detail="student_prompt exceeds maximum length.")
 
     # Resolve the effective learning context. The frontend may send
     # either the new structured `learning_context` object (preferred),
     # or the legacy bare `resource_id` field (backward compatibility).
     ctx = request.learning_context
-    if ctx and ctx.resource_id and request.resource_id and ctx.resource_id != request.resource_id:
+    top_resource_id = _normalize_optional_uuid(request.resource_id, "resource_id")
+    ctx_resource_id = (
+        _normalize_optional_uuid(ctx.resource_id, "learning_context.resource_id")
+        if ctx
+        else None
+    )
+    if ctx_resource_id and top_resource_id and ctx_resource_id != top_resource_id:
         raise HTTPException(
             status_code=400,
             detail="resource_id conflicts with learning_context.resource_id.",
         )
-    effective_resource_id = (
-        (ctx.resource_id if ctx and ctx.resource_id else None)
-        or request.resource_id
-    )
+    effective_resource_id = ctx_resource_id or top_resource_id
+    if ctx and ctx.focused_asset:
+        ctx.focused_asset = _normalize_optional_uuid(ctx.focused_asset, "learning_context.focused_asset")
     if ctx and ctx.focused_asset and not effective_resource_id:
         raise HTTPException(status_code=400, detail="A focused asset requires a resource_id.")
     if ctx and effective_resource_id and not ctx.resource_id:
@@ -788,7 +1210,7 @@ async def tutor_endpoint(
     # grounds its answer in the CURRENTLY SELECTED worksheet, not a
     # hardcoded resource.
     retrieved_chunks = _retrieve_relevant_chunks(
-        request.student_prompt,
+        student_prompt,
         resource_id=effective_resource_id,
     )
 
@@ -820,10 +1242,11 @@ async def tutor_endpoint(
     rag_context = _format_chunks_as_context(retrieved_chunks)
     sources = _chunks_to_sources(retrieved_chunks)
 
-    print(f"[RAG] Retrieved {len(retrieved_chunks)} chunks for tutor context"
-          f" (grounded={len(grounded_chunks)}).")
-
-    route_target = evaluate_routing(request.student_prompt)
+    logger.info(
+        "[RAG] Retrieved %d chunks for tutor context (grounded=%d).",
+        len(retrieved_chunks),
+        len(grounded_chunks),
+    )
 
     # --- Tutor context preamble (Tasks 1 & 4) ---
     # When a focused asset is present, tell the tutor EXACTLY which
@@ -918,62 +1341,15 @@ async def tutor_endpoint(
             "for a narrower question or suggest retrying when the worksheet context is available.\n"
         )
 
-    if route_target == "OPENCODE_ZEN":
-        # Route to OpenCode Zen (primary) with NVIDIA fallback
-        messages = []
-        for msg in request.history:
-            messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.content})
-        messages.append({"role": "user", "content": request.student_prompt})
+    reply, model_used = _call_llm_with_fallback(
+        request.history,
+        student_prompt,
+        system_prompt,
+        temperature=0.2,
+        max_tokens=4096,
+    )
+    return TutorResponse(response=reply, model_used=model_used, sources=sources)
 
-        try:
-            reply, model_used = _call_opencode_zen(messages, system_prompt)
-            return TutorResponse(response=reply, model_used=model_used, sources=sources)
-        except Exception as e:
-            print(f"OpenCode Zen failed, falling back to NVIDIA: {e}")
-            if not nvidia_client:
-                raise
-            reply, model_used = _call_nvidia(messages, system_prompt)
-            return TutorResponse(response=reply, model_used=model_used, sources=sources)
-
-    elif route_target == "NVIDIA":
-        if not nvidia_client:
-            raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
-
-        messages = []
-        for msg in request.history:
-            messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.content})
-        messages.append({"role": "user", "content": request.student_prompt})
-
-        try:
-            reply, model_used = _call_nvidia(messages, system_prompt)
-            return TutorResponse(response=reply, model_used=model_used, sources=sources)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"NVIDIA API Error: {str(e)}")
-
-    else:
-        # Route to Gemini Flash for simple/conversational tasks (last resort)
-        if not GEMINI_API_KEY:
-            raise HTTPException(status_code=500, detail="GEMINI API is not configured.")
-
-        try:
-            gemini_history = []
-            for msg in request.history:
-                role = "user" if msg.role == "user" else "model"
-                gemini_history.append({"role": role, "parts": [{"text": msg.content}]})
-
-            local_model = genai.GenerativeModel(
-                'gemini-2.5-flash',
-                system_instruction=system_prompt
-            )
-
-            chat = local_model.start_chat(history=gemini_history)
-            result = chat.send_message(request.student_prompt)
-            reply_text = result.text or ""
-
-            return TutorResponse(response=reply_text, model_used="GEMINI_FLASH", sources=sources)
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
 
 @app.get("/health")
 async def health_check():
@@ -987,7 +1363,7 @@ async def health_check():
 def _supabase_headers() -> dict:
     """Build the standard PostgREST headers using the service-role key."""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        raise HTTPException(status_code=500, detail="Supabase credentials not configured.")
+        raise HTTPException(status_code=503, detail="Database service is not configured.")
     return {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -995,8 +1371,40 @@ def _supabase_headers() -> dict:
     }
 
 
+def _fetch_resource_assets(resource_id: str, asset_type: Optional[str] = None) -> list[dict]:
+    """Query visual assets for a validated resource_id safely via PostgREST params."""
+    headers = _supabase_headers()
+    params = {
+        "resource_id": f"eq.{resource_id}",
+        "select": (
+            "id,page_number,asset_type,storage_url,mime_type,width,height,"
+            "bounding_box,caption,linked_question_id,content_verified,metadata,created_at"
+        ),
+        "order": "page_number.asc,created_at.asc" if asset_type is None else "page_number.asc",
+    }
+    if asset_type is not None:
+        params["asset_type"] = f"eq.{asset_type}"
+
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/resource_assets",
+            headers=headers,
+            params=params,
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        logger.warning("Supabase asset request error: %s", _sanitize_error_text(exc))
+        raise HTTPException(status_code=503, detail="Database service is temporarily unavailable.") from exc
+
+    if resp.status_code != 200:
+        logger.warning("Supabase asset query failed with status %s.", resp.status_code)
+        raise HTTPException(status_code=502, detail="Failed to retrieve visual assets.")
+
+    return _safe_json_list(resp)
+
+
 @app.get("/api/resources/{resource_id}/assets")
-async def get_resource_assets(
+def get_resource_assets(
     resource_id: str,
     _user: dict = Depends(get_current_user),
 ):
@@ -1007,29 +1415,15 @@ async def get_resource_assets(
     array of asset objects with public `storage_url`s ready for
     frontend <img> rendering.
     """
-    headers = _supabase_headers()
-    endpoint = (
-        f"{SUPABASE_URL}/rest/v1/resource_assets"
-        f"?resource_id=eq.{resource_id}"
-        f"&select=id,page_number,asset_type,storage_url,mime_type,width,height,"
-        f"bounding_box,caption,linked_question_id,content_verified,metadata,created_at"
-        f"&order=page_number.asc,created_at.asc"
-    )
-    try:
-        resp = requests.get(endpoint, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Supabase query failed ({resp.status_code}): {resp.text[:200]}",
-            )
-        assets = resp.json()
-        return {"resource_id": resource_id, "assets": assets, "count": len(assets)}
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase: {exc}")
+    normalized_id = _normalize_optional_uuid(resource_id, "resource_id")
+    if not normalized_id:
+        raise HTTPException(status_code=400, detail="resource_id is required.")
+    assets = _fetch_resource_assets(normalized_id)
+    return {"resource_id": normalized_id, "assets": assets, "count": len(assets)}
 
 
 @app.get("/api/resources/{resource_id}/assets/{asset_type}")
-async def get_resource_assets_by_type(
+def get_resource_assets_by_type(
     resource_id: str,
     asset_type: str,
     _user: dict = Depends(get_current_user),
@@ -1038,51 +1432,43 @@ async def get_resource_assets_by_type(
     List visual assets of a specific type for a resource
     (e.g. /api/resources/{id}/assets/graph).
     """
-    headers = _supabase_headers()
-    endpoint = (
-        f"{SUPABASE_URL}/rest/v1/resource_assets"
-        f"?resource_id=eq.{resource_id}&asset_type=eq.{asset_type}"
-        f"&select=id,page_number,asset_type,storage_url,mime_type,width,height,"
-        f"bounding_box,caption,linked_question_id,content_verified,metadata,created_at"
-        f"&order=page_number.asc"
-    )
-    try:
-        resp = requests.get(endpoint, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Supabase query failed ({resp.status_code}): {resp.text[:200]}",
-            )
-        assets = resp.json()
-        return {
-            "resource_id": resource_id,
-            "asset_type": asset_type,
-            "assets": assets,
-            "count": len(assets),
-        }
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase: {exc}")
+    normalized_id = _normalize_optional_uuid(resource_id, "resource_id")
+    if not normalized_id:
+        raise HTTPException(status_code=400, detail="resource_id is required.")
+    normalized_type = _validate_asset_type(asset_type)
+    assets = _fetch_resource_assets(normalized_id, asset_type=normalized_type)
+    return {
+        "resource_id": normalized_id,
+        "asset_type": normalized_type,
+        "assets": assets,
+        "count": len(assets),
+    }
 
 # -------------------------------------------------------------------
 # Hybrid Retrieval Endpoints (Session 2 — Hybrid Retrieval Foundation)
 # -------------------------------------------------------------------
 
-# Embedding model constants (must match pipeline/embedding_pipeline.py)
-EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
-EMBED_DIM = 1024
-
 
 def _embed_query(text: str) -> list[float]:
-    """Embed a natural-language query via NVIDIA NV-EmbedQA-E5-V5."""
+    """Embed a natural-language query via active NVIDIA NIM embedding model."""
     if not nvidia_client:
-        raise HTTPException(status_code=500, detail="NVIDIA API is not configured.")
-    resp = nvidia_client.embeddings.create(
-        model=EMBED_MODEL,
-        input=text,
-        encoding_format="float",
-        extra_body={"input_type": "query", "truncate": "END"},
-    )
-    return resp.data[0].embedding
+        raise HTTPException(status_code=503, detail="Embedding service is not configured.")
+
+    kwargs: dict = {
+        "model": EMBED_MODEL,
+        "input": text,
+        "encoding_format": "float",
+        "extra_body": {"input_type": "query", "truncate": "END"},
+        "timeout": 10.0,
+    }
+    if "nemotron-3.5-embed" in EMBED_MODEL.lower():
+        kwargs["dimensions"] = EMBED_DIM
+
+    resp = nvidia_client.embeddings.create(**kwargs)
+    vec = resp.data[0].embedding
+    if len(vec) != EMBED_DIM:
+        raise ValueError(f"Embedding dimension mismatch: expected {EMBED_DIM}, got {len(vec)}")
+    return vec
 
 
 def _vector_to_pg_str(vec: list[float]) -> str:
@@ -1106,34 +1492,47 @@ class HybridSearchRequest(BaseModel):
 
 
 @app.post("/api/search")
-async def semantic_search(
+def semantic_search(
     request: SearchRequest,
     _user: dict = Depends(get_current_user),
 ):
     """
     Pure vector (semantic) search over resource_chunks.
 
-    Embeds the query via NVIDIA NV-EmbedQA-E5-V5 and calls the
-    `match_resource_chunks` Postgres RPC function for cosine
-    similarity ranking.
+    Embeds the query via NVIDIA NIM and calls the `match_resource_chunks`
+    Postgres RPC function for cosine similarity ranking.
     """
-    if not request.query.strip():
+    query = (request.query or "").strip()
+    if not query:
         raise HTTPException(status_code=400, detail="Query is required.")
     if not SUPABASE_URL or not SUPABASE_KEY:
-        raise HTTPException(status_code=500, detail="Supabase credentials not configured.")
+        raise HTTPException(status_code=503, detail="Database service is not configured.")
 
-    # 1. Embed query
-    query_vec = _embed_query(request.query)
+    filter_resource_id = _normalize_optional_uuid(request.filter_resource_id, "filter_resource_id")
+    match_count = max(1, min(request.match_count, 50))
+
+    # 1. Embed query safely (never allow upstream exceptions to escape CORSMiddleware)
+    try:
+        query_vec = _embed_query(query)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Semantic search embedding error: %s", _sanitize_error_text(exc))
+        raise HTTPException(
+            status_code=503,
+            detail="Semantic vector search is temporarily unavailable.",
+        ) from exc
+
     vec_str = _vector_to_pg_str(query_vec)
 
     # 2. Call RPC function
     headers = _supabase_headers()
     rpc_body = {
         "query_embedding": vec_str,
-        "match_count": request.match_count,
+        "match_count": match_count,
     }
-    if request.filter_resource_id:
-        rpc_body["filter_resource_id"] = request.filter_resource_id
+    if filter_resource_id:
+        rpc_body["filter_resource_id"] = filter_resource_id
 
     try:
         resp = requests.post(
@@ -1142,24 +1541,25 @@ async def semantic_search(
             json=rpc_body,
             timeout=15,
         )
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Vector search RPC failed ({resp.status_code}): {resp.text[:200]}",
-            )
-        results = resp.json()
-        return {
-            "query": request.query,
-            "results": results,
-            "count": len(results),
-            "search_type": "semantic",
-        }
     except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase: {exc}")
+        logger.warning("Vector search RPC network error: %s", _sanitize_error_text(exc))
+        raise HTTPException(status_code=503, detail="Database service is temporarily unavailable.") from exc
+
+    if resp.status_code != 200:
+        logger.warning("Vector search RPC failed with status %s.", resp.status_code)
+        raise HTTPException(status_code=502, detail="Vector search query failed.")
+
+    results = _safe_json_list(resp)
+    return {
+        "query": query,
+        "results": results,
+        "count": len(results),
+        "search_type": "semantic",
+    }
 
 
 @app.post("/api/search/hybrid")
-async def hybrid_search(
+def hybrid_search(
     request: HybridSearchRequest,
     _user: dict = Depends(get_current_user),
 ):
@@ -1167,70 +1567,108 @@ async def hybrid_search(
     Combined relational + vector (semantic) search.
 
     Runs both:
-      - Relational: filter resources by spec_point_id and/or chunk_type
-        via PostgREST on the resources / resource_chunks tables
-      - Vector: pgvector cosine similarity via match_resource_chunks RPC
+      - Relational + lexical: filter resources/chunks via PostgREST
+      - Vector: pgvector cosine similarity via match_resource_chunks RPC (non-fatal)
 
     Merges results, deduplicating by chunk id and keeping the higher
     similarity score. Vector results that also appear in the relational
-    results get a relevance boost.
+    results get a relevance boost. If vector search is unavailable or in a
+    different embedding space, gracefully degrades to relational/lexical search.
     """
-    if not request.query.strip():
+    query = (request.query or "").strip()
+    if not query:
         raise HTTPException(status_code=400, detail="Query is required.")
     if not SUPABASE_URL or not SUPABASE_KEY:
-        raise HTTPException(status_code=500, detail="Supabase credentials not configured.")
+        raise HTTPException(status_code=503, detail="Database service is not configured.")
+
+    resource_id = _normalize_optional_uuid(request.resource_id, "resource_id")
+    spec_point_id = _normalize_optional_uuid(request.spec_point_id, "spec_point_id")
+    chunk_type = _validate_asset_type(request.chunk_type) if (request.chunk_type and request.chunk_type.strip()) else None
+    match_count = max(1, min(request.match_count, 50))
 
     headers = _supabase_headers()
 
-    # --- 1. Vector search ---
-    query_vec = _embed_query(request.query)
-    vec_str = _vector_to_pg_str(query_vec)
+    # --- 1. Vector search (non-fatal when embedding provider is unavailable) ---
+    vector_results: list[dict] = []
+    vector_ok = False
+    if nvidia_client:
+        try:
+            query_vec = _embed_query(query)
+            vec_str = _vector_to_pg_str(query_vec)
 
-    rpc_body = {
-        "query_embedding": vec_str,
-        "match_count": request.match_count * 2,  # fetch more for merging
-    }
-    if request.resource_id:
-        rpc_body["filter_resource_id"] = request.resource_id
+            rpc_body = {
+                "query_embedding": vec_str,
+                "match_count": match_count * 2,  # fetch more for merging
+            }
+            if resource_id:
+                rpc_body["filter_resource_id"] = resource_id
 
-    try:
-        rpc_resp = requests.post(
-            f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
-            headers=headers,
-            json=rpc_body,
-            timeout=15,
-        )
-        if rpc_resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Vector search RPC failed ({rpc_resp.status_code}): {rpc_resp.text[:200]}",
+            rpc_resp = requests.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
+                headers=headers,
+                json=rpc_body,
+                timeout=15,
             )
-        vector_results = rpc_resp.json()
-        if request.chunk_type:
-            # The existing RPC supports resource scoping but not chunk type;
-            # enforce the UI's selected type before merging vector results.
-            vector_results = [
-                result for result in vector_results
-                if result.get("chunk_type") == request.chunk_type
-            ]
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Network error reaching Supabase (vector): {exc}")
+            if rpc_resp.status_code == 200:
+                vector_results = _safe_json_list(rpc_resp)
+                vector_ok = True
+                if chunk_type:
+                    vector_results = [
+                        result for result in vector_results
+                        if result.get("chunk_type") == chunk_type
+                    ]
+            else:
+                logger.warning("Hybrid vector RPC failed with status %s.", rpc_resp.status_code)
+        except (HTTPException, Exception) as exc:
+            logger.warning("Hybrid vector search degraded (non-fatal): %s", _sanitize_error_text(exc))
 
-    # --- 2. Relational search (optional filters) ---
+    # --- 2. Relational + lexical search (PostgREST) ---
     relational_results: list[dict] = []
+    relational_ok = False
 
-    # If we have a chunk_type filter, fetch matching chunks relationally.
-    # Apply resource scope here too; otherwise the UI filter is silently
-    # ignored for the normal worksheet-scoped search.
-    if request.chunk_type:
+    # Resolve spec_point_id -> resource_ids if provided
+    spec_resource_ids: Optional[list[str]] = None
+    if spec_point_id:
+        try:
+            res_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/resources",
+                headers=headers,
+                params={"specification_point_id": f"eq.{spec_point_id}", "select": "id"},
+                timeout=15,
+            )
+            if res_resp.status_code == 200:
+                relational_ok = True
+                spec_resource_ids = [str(r["id"]) for r in _safe_json_list(res_resp) if r.get("id")]
+                if resource_id:
+                    spec_resource_ids = [rid for rid in spec_resource_ids if rid == resource_id]
+        except requests.RequestException as exc:
+            logger.warning("Hybrid spec_point lookup failed: %s", _sanitize_error_text(exc))
+
+    # Lexical keyword retrieval (provides real matches even if vector embeddings
+    # are unavailable or come from an incompatible embedding model space).
+    lexical_results: list[dict] = []
+    if spec_resource_ids is None or len(spec_resource_ids) > 0:
+        lexical_results, lex_ok = _lexical_search_chunks(
+            query,
+            match_count=match_count * 2,
+            resource_id=resource_id,
+            chunk_type=chunk_type,
+            resource_ids=spec_resource_ids,
+        )
+        relational_ok = relational_ok or lex_ok
+
+    # Explicit chunk_type filter relational fetch (preserves boost when filter chip active)
+    if chunk_type and (spec_resource_ids is None or len(spec_resource_ids) > 0):
         try:
             rel_params = {
-                "chunk_type": f"eq.{request.chunk_type}",
+                "chunk_type": f"eq.{chunk_type}",
                 "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
-                "limit": str(request.match_count * 2),
+                "limit": str(match_count * 2),
             }
-            if request.resource_id:
-                rel_params["resource_id"] = f"eq.{request.resource_id}"
+            if resource_id:
+                rel_params["resource_id"] = f"eq.{resource_id}"
+            elif spec_resource_ids:
+                rel_params["resource_id"] = f"in.({','.join(spec_resource_ids)})"
             rel_resp = requests.get(
                 f"{SUPABASE_URL}/rest/v1/resource_chunks",
                 headers=headers,
@@ -1238,44 +1676,51 @@ async def hybrid_search(
                 timeout=15,
             )
             if rel_resp.status_code == 200:
-                relational_results = rel_resp.json()
-        except requests.RequestException:
-            pass  # non-fatal — vector results still usable
-
-    # If we have spec_point_id, fetch resources by spec_point and their chunks
-    if request.spec_point_id:
-        try:
-            res_endpoint = (
-                f"{SUPABASE_URL}/rest/v1/resources"
-                f"?specification_point_id=eq.{request.spec_point_id}"
-                f"&select=id"
-            )
-            res_resp = requests.get(res_endpoint, headers=headers, timeout=15)
-            if res_resp.status_code == 200 and res_resp.json():
-                res_ids = [r["id"] for r in res_resp.json()]
-                # Fetch chunks for these resources
-                if res_ids:
-                    id_filter = ",".join(res_ids)
-                    chunk_endpoint = (
-                        f"{SUPABASE_URL}/rest/v1/resource_chunks"
-                        f"?resource_id=in.({id_filter})"
-                        + (f"&chunk_type=eq.{request.chunk_type}" if request.chunk_type else "")
-                        + f"&select=id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count"
-                        + f"&limit={request.match_count * 2}"
-                    )
-                    chunk_resp = requests.get(chunk_endpoint, headers=headers, timeout=15)
-                    if chunk_resp.status_code == 200:
-                        # Tag these as relational-only matches (no similarity score yet)
-                        for c in chunk_resp.json():
-                            c["similarity"] = None  # no vector score
-                        relational_results.extend(chunk_resp.json())
+                relational_ok = True
+                relational_results.extend(_safe_json_list(rel_resp))
         except requests.RequestException:
             pass
+
+    # If spec_point_id was filtered without chunk_type, include those scoped chunks too
+    if spec_point_id and not chunk_type and spec_resource_ids:
+        try:
+            chunk_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/resource_chunks",
+                headers=headers,
+                params={
+                    "resource_id": f"in.({','.join(spec_resource_ids)})",
+                    "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+                    "limit": str(match_count * 2),
+                },
+                timeout=15,
+            )
+            if chunk_resp.status_code == 200:
+                relational_ok = True
+                for c in _safe_json_list(chunk_resp):
+                    c["similarity"] = None
+                    relational_results.append(c)
+        except requests.RequestException:
+            pass
+
+    if not vector_ok and not relational_ok:
+        raise HTTPException(
+            status_code=503,
+            detail="Search service is temporarily unavailable.",
+        )
+
+    # Filter out low-confidence cross-model vector noise when lexical matches exist,
+    # and clamp any negative cosine similarity so UI badges never show negative %.
+    max_vec_sim = max((r.get("similarity") or 0.0 for r in vector_results), default=0.0)
+    if lexical_results and max_vec_sim < VECTOR_MIN_RELEVANCE:
+        vector_results = []
+    else:
+        for r in vector_results:
+            if r.get("similarity") is not None and r["similarity"] < 0:
+                r["similarity"] = 0.0
 
     # --- 3. Merge & deduplicate ---
     merged: dict[str, dict] = {}
 
-    # Add vector results first (they have similarity scores)
     for r in vector_results:
         chunk_id = r.get("id")
         if chunk_id:
@@ -1283,11 +1728,25 @@ async def hybrid_search(
             r["boosted"] = False
             merged[chunk_id] = r
 
-    # Add relational results, boosting existing entries
+    for r in lexical_results:
+        chunk_id = r.get("id")
+        if not chunk_id:
+            continue
+        if chunk_id in merged:
+            existing = merged[chunk_id]
+            existing["similarity"] = min(1.0, max(existing.get("similarity") or 0.0, r.get("similarity") or 0.0) + 0.05)
+            existing["boosted"] = True
+            existing["source"] = "both"
+        else:
+            r["source"] = "lexical"
+            r["boosted"] = False
+            merged[chunk_id] = r
+
     for r in relational_results:
         chunk_id = r.get("id")
+        if not chunk_id:
+            continue
         if chunk_id in merged:
-            # Already in vector results — boost it
             existing = merged[chunk_id]
             if existing.get("similarity") is not None:
                 existing["similarity"] = min(1.0, existing["similarity"] + 0.1)
@@ -1296,24 +1755,24 @@ async def hybrid_search(
         else:
             r["source"] = "relational"
             r["boosted"] = False
-            r["similarity"] = 0.0  # relational-only, no vector score
+            r["similarity"] = 0.0
             merged[chunk_id] = r
 
     # Sort: boosted first, then by similarity descending
     final = sorted(
         merged.values(),
-        key=lambda x: (x.get("boosted", False), x.get("similarity") or 0),
+        key=lambda x: (x.get("boosted", False), x.get("similarity") or 0.0),
         reverse=True,
     )
-    final = final[:request.match_count]
+    final = final[:match_count]
 
     return {
-        "query": request.query,
+        "query": query,
         "results": final,
         "count": len(final),
         "search_type": "hybrid",
         "vector_count": len(vector_results),
-        "relational_count": len(relational_results),
+        "relational_count": len(relational_results) + len(lexical_results),
     }
 
 
@@ -1324,6 +1783,7 @@ async def get_question(
 ):
     # This simulates fetching a question and its examiner report hint from OpenKB
     # based on the resource_id.
+    _normalize_optional_uuid(resource_id, "resource_id")
     return {
         "question_index": 1,
         "question_text": "A car accelerates uniformly from rest to 20 m/s in 5 seconds. Calculate the acceleration of the car. Show your working. $a = \\frac{\\Delta v}{\\Delta t}$",
@@ -1331,8 +1791,9 @@ async def get_question(
         "examiner_hint": "**Examiner Report Highlight:** Many students forget that 'from rest' implies an initial velocity ($u$) of 0 m/s. Ensure you state the formula clearly before substituting values. Remember $a = \\frac{v - u}{t}$."
     }
 
+
 @app.post("/api/grade", response_model=GradeResponse)
-async def grade_endpoint(
+def grade_endpoint(
     request: GradeRequest,
     _user: dict = Depends(get_current_user),
 ):
@@ -1343,8 +1804,16 @@ async def grade_endpoint(
             detail="student_id must match the authenticated user.",
         )
 
+    _normalize_optional_uuid(request.resource_id, "resource_id")
+    if request.max_score <= 0:
+        raise HTTPException(status_code=400, detail="max_score must be positive.")
+    if not (request.student_answer or "").strip():
+        raise HTTPException(status_code=400, detail="student_answer is required.")
+    if not (request.question_text or "").strip():
+        raise HTTPException(status_code=400, detail="question_text is required.")
+
     context_data = fetch_forces_and_motion_data()
-    
+
     system_prompt = (
         "You are a STRICT Edexcel IGCSE Physics Examiner. Your role is to grade student answers with zero leniency.\n"
         "You MUST respond ONLY with a valid JSON object with exactly three keys: 'marks_awarded' (integer), 'total_marks' (integer), and 'explanation' (string).\n"
@@ -1374,62 +1843,40 @@ async def grade_endpoint(
         "  2. State which marks were awarded and the precise reason for each.\n"
         "  3. If a mark was withheld, state the EXACT error the student made.\n"
     )
-    
+
     if context_data:
         system_prompt += f"\n\nContext (Forces and Motion Knowledge Graph & Mark Scheme):\n{context_data}\n"
-        
+
     user_prompt = (
         f"Question: {request.question_text}\n"
         f"Maximum marks available: {request.max_score}\n"
         f"Student's Answer: {request.student_answer}\n"
         "Please provide your strict JSON assessment."
     )
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
 
-    # Try OpenCode Zen first, fall back to NVIDIA
     def _parse_grade_reply(reply: str) -> GradeResponse:
         try:
             parsed_json = json.loads(reply)
         except json.JSONDecodeError:
-            match = re.search(r'\{.*\}', reply, re.DOTALL)
+            match = re.search(r"\{.*\}", reply, re.DOTALL)
             if match:
                 parsed_json = json.loads(match.group(0))
             else:
                 raise ValueError("Could not extract JSON from LLM response.")
+        raw_marks = int(parsed_json.get("marks_awarded", 0))
+        clamped_marks = max(0, min(request.max_score, raw_marks))
         return GradeResponse(
-            marks_awarded=parsed_json.get("marks_awarded", 0),
+            marks_awarded=clamped_marks,
             total_marks=request.max_score,
-            explanation=parsed_json.get("explanation", "No explanation provided.")
+            explanation=str(parsed_json.get("explanation", "No explanation provided.")),
         )
 
-    if opencode_zen_client:
-        try:
-            response = opencode_zen_client.chat.completions.create(
-                model="deepseek-v4-flash-free",
-                messages=messages,
-                temperature=0.1,
-                max_tokens=2048,
-            )
-            reply = response.choices[0].message.content
-            return _parse_grade_reply(reply)
-        except Exception as e:
-            print(f"OpenCode Zen grading failed, falling back to NVIDIA: {e}")
-
-    if nvidia_client:
-        try:
-            response = nvidia_client.chat.completions.create(
-                model="nvidia/nemotron-3-super-120b-a12b",
-                messages=messages,
-                temperature=0.1,
-                max_tokens=2048,
-            )
-            reply = response.choices[0].message.content
-            return _parse_grade_reply(reply)
-        except Exception as e:
-            print(f"NVIDIA grading also failed: {e}")
-
-    raise HTTPException(status_code=500, detail="All grading providers failed.")
+    graded, _model_used = _call_llm_with_fallback(
+        [],
+        user_prompt,
+        system_prompt,
+        temperature=0.1,
+        max_tokens=2048,
+        validator=_parse_grade_reply,
+    )
+    return graded

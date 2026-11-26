@@ -8,10 +8,12 @@ import HybridDocumentViewer from './HybridDocumentViewer';
 import SearchPanel from './SearchPanel';
 import QuizEngine from './QuizEngine';
 import { supabase } from '../lib/supabaseClient';
-import { authenticatedFetch } from '../lib/apiClient';
-
-// Backend API base URL — sourced from env, falls back to localhost:8000 for dev.
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import {
+  API_BASE,
+  authenticatedFetch,
+  formatApiError,
+  parseApiErrorResponse,
+} from '../lib/apiClient';
 
 // Initial greeting — defined at module scope so the useState initializer
 // and the chapter-reset effect reference the same stable constant (avoids
@@ -125,6 +127,7 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState(null);
   const [isTutorOpen, setIsTutorOpen] = useState(false);
 
   // Synchronization focus state (Stage 4: bidirectional sync)
@@ -154,6 +157,17 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
   // transitions to prevent stale responses from overwriting newer state.
   const resourceAbortRef = useRef(null);
 
+  // AbortController for in-flight tutor requests — cancelled on chapter change
+  // or unmount so stale/aborted requests do not linger or overwrite newer state.
+  const tutorAbortRef = useRef(null);
+
+  // Monotonic message ID counter to avoid React key collisions.
+  const messageSeqRef = useRef(1);
+  const nextMessageId = () => {
+    messageSeqRef.current += 1;
+    return `${Date.now()}-${messageSeqRef.current}`;
+  };
+
   // Generation counter for tutor requests — each send increments this; when a
   // response arrives, we check it's still the latest generation before applying.
   // This prevents stale tutor responses from a previous chapter from bleeding in.
@@ -170,6 +184,15 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
     scrollToBottom();
   }, [messages, isLoading]);
 
+  useEffect(() => {
+    return () => {
+      if (tutorAbortRef.current) {
+        tutorAbortRef.current.abort();
+        tutorAbortRef.current = null;
+      }
+    };
+  }, []);
+
   // ISSUE 3 (Session 4A.2): Complete state reset on chapter change.
   // Every chapter/resource transition must clear all worksheet-slice state
   // so no information bleeds across chapters: LearningContext, focus,
@@ -183,7 +206,11 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
       resourceAbortRef.current.abort();
       resourceAbortRef.current = null;
     }
-    // Invalidate any in-flight tutor response from the previous chapter.
+    // Abort any in-flight tutor fetch and invalidate stale generation.
+    if (tutorAbortRef.current) {
+      tutorAbortRef.current.abort();
+      tutorAbortRef.current = null;
+    }
     tutorGenRef.current += 1;
 
     // Reset all worksheet-scoped state.
@@ -191,6 +218,7 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
     setFocus(null);
     setWorksheetResource(null);
     setIsLoading(false);
+    setLoadingPhase(null);
     setShowSearch(false);
     setActiveSpecPointId(null);
     // Reset the concept card scroll refs.
@@ -305,30 +333,44 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
     }
   }, [focus]);
 
+  const handleReauthenticate = async () => {
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      window.location.assign('/auth');
+    }
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
-    if (!inputValue.trim() || isLoading) return;
-
-    const userMessageText = inputValue;
+    const userMessageText = inputValue.trim();
+    if (!userMessageText || isLoading) return;
 
     // 1. Add user message to UI
-    const newUserMsg = { id: Date.now(), role: 'user', text: userMessageText };
+    const newUserMsg = { id: nextMessageId(), role: 'user', text: userMessageText };
     setMessages((prev) => [...prev, newUserMsg]);
     setInputValue('');
     setIsLoading(true);
+    setLoadingPhase('sending');
 
-    // 2. Format history for Backend
+    // 2. Format history for Backend (exclude welcome banner and UI error bubbles)
     const formattedHistory = messages
-      .filter(msg => msg.id !== 1)
-      .map(msg => ({
+      .filter((msg) => msg.id !== 1 && !msg.isError && typeof msg.text === 'string' && msg.text.trim())
+      .map((msg) => ({
         role: msg.role === 'ai' ? 'model' : 'user',
-        content: msg.text
+        content: msg.text,
       }));
 
     // ISSUE 3 (Session 4A.2): Assign a generation counter before the
     // request so we can detect if the chapter changed during the fetch.
     // If the generation is stale when the response arrives, discard it.
     const myGen = ++tutorGenRef.current;
+
+    if (tutorAbortRef.current) {
+      tutorAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    tutorAbortRef.current = controller;
 
     try {
       // 3. Call FastAPI /api/tutor with RAG-retrieved context + structured
@@ -341,6 +383,10 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
       // IDs and returns them in the response. The learning context carries
       // only the asset identity (id, type, page) so the backend can verify
       // the asset and derive its canonical label.
+      const parsedPage =
+        focus?.page != null && Number.isFinite(Number(focus.page))
+          ? Math.trunc(Number(focus.page))
+          : null;
       const learningContext = focus ? {
         resource_id: worksheetResource?.id || null,
         chapter_id: chapterId || null,
@@ -348,11 +394,17 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
         focused_asset: focus.asset_id || focus.focused_asset || null,
         focused_asset_type: focus.asset_type || null,
         focused_question: focus.focused_question || null,
-        page: focus.page ?? null,
+        page: parsedPage,
       } : null;
 
       const response = await authenticatedFetch(`${API_BASE}/api/tutor`, {
         method: 'POST',
+        signal: controller.signal,
+        onStatusChange: (phase) => {
+          if (myGen === tutorGenRef.current) {
+            setLoadingPhase(phase);
+          }
+        },
         body: JSON.stringify({
           student_prompt: userMessageText,
           history: formattedHistory,
@@ -362,19 +414,24 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
       });
 
       if (!response.ok) {
-        throw new Error('Network response was not ok');
+        throw await parseApiErrorResponse(response);
       }
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error('The tutor server returned an unexpected response format.');
+      }
 
       // ISSUE 3: Discard stale responses from a previous chapter/resource.
       // If the generation counter changed during the fetch, a chapter
       // transition occurred — do not apply the stale response.
-      if (myGen !== tutorGenRef.current) return;
+      if (myGen !== tutorGenRef.current || controller.signal.aborted) return;
 
-      let aiText = data.response || '';
-      const modelUsed = data.model_used || 'Unknown Model';
-      const sources = data.sources || [];
+      let aiText = data?.response || '';
+      const modelUsed = data?.model_used || 'Unknown Model';
+      const sources = Array.isArray(data?.sources) ? data.sources : [];
 
       console.log(`[Semantic Router] Routed to: ${modelUsed}`);
       console.log(`[RAG] Sources: ${sources.length} chunks retrieved`);
@@ -397,28 +454,35 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
       // Append successfully received message (with sources)
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, role: 'ai', text: aiText, modelUsed: modelUsed, sources: sources }
+        { id: nextMessageId(), role: 'ai', text: aiText, modelUsed: modelUsed, sources: sources }
       ]);
 
     } catch (error) {
-      // ISSUE 3: If the generation changed, the error is from a stale
-      // request — do not show an error message for a cancelled chapter.
-      if (myGen !== tutorGenRef.current) return;
-      console.error('Failed to fetch from backend:', error);
-      // 4. Error Handling: add a styled error message
+      // ISSUE 3: If the generation changed or request was cancelled, ignore stale error.
+      if (myGen !== tutorGenRef.current || error?.isAbort || controller.signal.aborted) return;
+      console.error('Tutor request failed:', error?.status ?? error?.code ?? 'unknown');
+      const formatted = formatApiError(error);
+      // 4. Error Handling: surface status-aware, sanitized feedback via JSX interpolation.
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now() + 1,
+          id: nextMessageId(),
           role: 'ai',
-          text: 'Connection error: I am currently unable to reach the neural network. Please try again.',
-          isError: true
+          text: formatted.message,
+          isError: true,
+          errorStatus: formatted.status,
+          errorCode: formatted.code,
+          isAuthError: formatted.isAuthError,
         }
       ]);
     } finally {
+      if (tutorAbortRef.current === controller) {
+        tutorAbortRef.current = null;
+      }
       // ISSUE 3: Only clear loading if this is still the active generation.
       if (myGen === tutorGenRef.current) {
         setIsLoading(false);
+        setLoadingPhase(null);
       }
     }
   };
@@ -593,7 +657,13 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
                     <div className="flex items-center gap-2 mt-0.5">
                        <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'} shadow-sm`}></div>
                        <span className={`text-[10px] uppercase tracking-wider ${isLoading ? 'text-amber-500' : 'text-emerald-500/80'} font-medium transition-colors`}>
-                         {isLoading ? 'Processing...' : 'Session Active'}
+                         {isLoading
+                           ? (loadingPhase === 'retrying'
+                               ? 'Retrying...'
+                               : loadingPhase === 'waking'
+                                 ? 'Waking Server...'
+                                 : 'Processing...')
+                           : 'Session Active'}
                        </span>
                     </div>
                  </div>
@@ -621,11 +691,26 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
                        ${msg.role === 'user'
                          ? 'bg-[#111]/80 backdrop-blur-sm border-blue-500/20 border text-blue-50/90 rounded-2xl rounded-tr-sm'
                          : (msg.isError ? 'bg-red-500/5 backdrop-blur-sm border border-red-500/20 text-red-200 rounded-2xl rounded-tl-sm' : 'bg-white/[0.03] backdrop-blur-sm border border-white/10 text-gray-300 rounded-2xl rounded-tl-sm w-full')}`}>
-                         <div className="prose prose-invert prose-emerald max-w-none prose-p:my-0 prose-pre:my-2 prose-sm font-light">
-                           <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                             {msg.text}
-                           </ReactMarkdown>
-                         </div>
+                         {msg.isError ? (
+                           <div role="alert" className="text-sm leading-relaxed font-normal text-red-200 space-y-2">
+                             <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                             {msg.isAuthError && (
+                               <button
+                                 type="button"
+                                 onClick={handleReauthenticate}
+                                 className="inline-flex items-center px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-400/30 text-xs font-medium text-red-100 hover:bg-red-500/30 transition-colors"
+                               >
+                                 Sign in again
+                               </button>
+                             )}
+                           </div>
+                         ) : (
+                           <div className="prose prose-invert prose-emerald max-w-none prose-p:my-0 prose-pre:my-2 prose-sm font-light">
+                             <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                               {msg.text}
+                             </ReactMarkdown>
+                           </div>
+                         )}
                          {/* RAG Source Citations — compact, clickable, expandable, traceable */}
                          {msg.sources && msg.sources.length > 0 && (
                            <div className="mt-3 pt-2 border-t border-white/5 flex flex-wrap gap-1.5 relative">
@@ -649,12 +734,19 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
                       <div className="w-8 h-8 rounded-full flex justify-center items-center shrink-0 bg-[#151515] border border-white/10">
                           <Bot className="w-4 h-4 text-emerald-400" />
                       </div>
-                      <div className="p-4 bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-sm flex items-center h-[52px]">
+                      <div className="p-4 bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-sm flex flex-col gap-2 min-h-[52px] justify-center">
                           <div className="flex gap-1.5 items-center">
                               <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
                               <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
                               <div className="w-1.5 h-1.5 bg-emerald-500/60 rounded-full animate-bounce"></div>
                           </div>
+                          {(loadingPhase === 'waking' || loadingPhase === 'retrying') && (
+                            <span role="status" aria-live="polite" className="text-xs text-amber-300/80 font-normal">
+                              {loadingPhase === 'retrying'
+                                ? 'Server is waking up — retrying connection...'
+                                : 'Waking up the AI Tutor server (first request may take ~30s)...'}
+                            </span>
+                          )}
                       </div>
                    </div>
                 )}
@@ -690,7 +782,15 @@ const InteractiveTutor = ({ activeTab = 'Worksheet', setActiveTab }) => {
                    value={inputValue}
                    onChange={(e) => setInputValue(e.target.value)}
                    disabled={isLoading}
-                   placeholder={isLoading ? "Tutor is writing..." : "Ask your tutor a question..."}
+                   placeholder={
+                     loadingPhase === 'retrying'
+                       ? 'Retrying connection...'
+                       : loadingPhase === 'waking'
+                         ? 'Waking up tutor server...'
+                         : isLoading
+                           ? 'Tutor is writing...'
+                           : 'Ask your tutor a question...'
+                   }
                    className="w-full bg-[#111] border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-gray-200 text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-300 shadow-inner placeholder-gray-600 font-sans disabled:opacity-50 disabled:cursor-not-allowed"
                  />
                  <button

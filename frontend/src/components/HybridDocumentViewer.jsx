@@ -237,7 +237,7 @@ const HybridDocumentViewer = ({ resourceId, focus, onFocus, conceptCardRefs }) =
   // at {resource_id}/original.pdf.
   useEffect(() => {
     if (!resourceId) return;
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
     if (!supabaseUrl) {
       console.error('VITE_SUPABASE_URL is not set; PDF preview is unavailable.');
       setPdfUrl(null);

@@ -36,7 +36,7 @@ from openai import OpenAI
 # Tunables
 # ------------------------------------------------------------------
 
-EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
+EMBED_MODEL = os.getenv("NVIDIA_EMBED_MODEL", "nvidia/nemotron-3.5-embed-1b").strip() or "nvidia/nemotron-3.5-embed-1b"
 EMBED_DIM = 1024
 MAX_CHUNK_CHARS = 1000  # rough boundary — chunk before this length
 
@@ -193,12 +193,15 @@ def _embed_texts(texts: list[str], nvidia_key: str,
 
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
-        resp = client.embeddings.create(
-            model=model,
-            input=batch,
-            encoding_format="float",
-            extra_body={"input_type": "passage", "truncate": "END"},
-        )
+        kwargs = {
+            "model": model,
+            "input": batch,
+            "encoding_format": "float",
+            "extra_body": {"input_type": "passage", "truncate": "END"},
+        }
+        if "nemotron-3.5-embed" in model.lower():
+            kwargs["dimensions"] = EMBED_DIM
+        resp = client.embeddings.create(**kwargs)
         for item in resp.data:
             all_vectors.append(item.embedding)
 
