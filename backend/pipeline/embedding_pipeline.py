@@ -2,33 +2,38 @@
 embedding_pipeline.py — Resource Chunk Embedding Pipeline (pgvector)
 
 Chunks the semantic JSON content of a resource into text segments,
-generates 1024-dimensional embeddings via NVIDIA NV-EmbedQA-E5-V5,
-and stores them in the `resource_chunks` table for pgvector cosine
-similarity search.
+generates 1024-dimensional embeddings via NVIDIA `nvidia/nemotron-3.5-embed-1b`
+(`dimensions=1024`), and stores them in the `resource_chunks` table for pgvector
+cosine similarity search.
 
 This is the embedding half of the hybrid retrieval architecture:
     resources.content JSON
         → chunker (split by concepts, questions, formulas)
-        → NVIDIA embedding API
+        → NVIDIA embedding API (nvidia/nemotron-3.5-embed-1b, 1024-dim)
         → resource_chunks table (with HNSW index)
 
 The retrieval half lives in the FastAPI search endpoints (main.py).
 
 Usage:
-    from pipeline.embedding_pipeline import embed_resource
+    from pipeline.embedding_pipeline import embed_resource, reembed_existing_chunks
     embed_resource(resource_id, supabase_url, supabase_key, nvidia_key)
+    reembed_existing_chunks(supabase_url, supabase_key, nvidia_key)
 
 Or CLI:
     python backend/pipeline/embedding_pipeline.py --resource-id <uuid>
+    python backend/pipeline/embedding_pipeline.py --reembed-existing [--dry-run] [--resource-id <uuid>]
 """
 
+import argparse
 import json
+import math
 import os
 import sys
-import argparse
-import requests
+import uuid
 from pathlib import Path
 from typing import Optional
+
+import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -36,9 +41,39 @@ from openai import OpenAI
 # Tunables
 # ------------------------------------------------------------------
 
-EMBED_MODEL = os.getenv("NVIDIA_EMBED_MODEL", "nvidia/nemotron-3.5-embed-1b").strip() or "nvidia/nemotron-3.5-embed-1b"
+DEFAULT_EMBED_MODEL = "nvidia/nemotron-3.5-embed-1b"
 EMBED_DIM = 1024
 MAX_CHUNK_CHARS = 1000  # rough boundary — chunk before this length
+
+
+def _resolve_embed_model(explicit_model: Optional[str] = None) -> str:
+    """Resolve the active embedding model dynamically after env loading."""
+    if explicit_model and explicit_model.strip():
+        return explicit_model.strip()
+    env_model = os.getenv("NVIDIA_EMBED_MODEL", DEFAULT_EMBED_MODEL).strip()
+    return env_model or DEFAULT_EMBED_MODEL
+
+
+EMBED_MODEL = _resolve_embed_model()
+
+
+def _validate_uuid(value: str, field_name: str) -> str:
+    """Validate and normalize a UUID string to prevent PostgREST filter injection."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Invalid {field_name}: must be a non-empty UUID string.")
+    try:
+        return str(uuid.UUID(value.strip()))
+    except ValueError as exc:
+        raise ValueError(f"Invalid {field_name} UUID: {value!r}") from exc
+
+
+def _sanitize_error(exc: Exception, secrets: tuple[Optional[str], ...] = ()) -> str:
+    """Return a short error string with any secret tokens redacted."""
+    msg = str(exc)
+    for secret in secrets:
+        if secret:
+            msg = msg.replace(secret, "[REDACTED]")
+    return f"{type(exc).__name__}: {msg[:200]}" if msg else type(exc).__name__
 
 # ------------------------------------------------------------------
 # Chunking logic
@@ -178,11 +213,12 @@ def chunk_resource_content(content) -> list[dict]:
 # ------------------------------------------------------------------
 
 def _embed_texts(texts: list[str], nvidia_key: str,
-                 model: str = EMBED_MODEL) -> list[list[float]]:
+                 model: Optional[str] = None) -> list[list[float]]:
     """
     Call NVIDIA embedding API to vectorise a batch of texts.
-    Returns a list of embedding vectors (each a list of floats).
+    Returns validated 1024-dim embedding vectors aligned 1:1 with `texts`.
     """
+    active_model = _resolve_embed_model(model)
     client = OpenAI(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key=nvidia_key,
@@ -194,16 +230,35 @@ def _embed_texts(texts: list[str], nvidia_key: str,
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
         kwargs = {
-            "model": model,
+            "model": active_model,
             "input": batch,
             "encoding_format": "float",
             "extra_body": {"input_type": "passage", "truncate": "END"},
+            "timeout": 30.0,
         }
-        if "nemotron-3.5-embed" in model.lower():
+        if "nemotron-3.5-embed" in active_model.lower():
             kwargs["dimensions"] = EMBED_DIM
         resp = client.embeddings.create(**kwargs)
-        for item in resp.data:
-            all_vectors.append(item.embedding)
+        items = sorted(
+            enumerate(resp.data),
+            key=lambda pair: getattr(pair[1], "index", pair[0]),
+        )
+        if len(items) != len(batch):
+            raise RuntimeError(
+                f"Embedding count mismatch: sent {len(batch)}, got {len(items)}"
+            )
+        for _, item in items:
+            vec = list(item.embedding)
+            if len(vec) != EMBED_DIM:
+                raise ValueError(
+                    f"Embedding dimension mismatch: expected {EMBED_DIM}, got {len(vec)}"
+                )
+            if not all(math.isfinite(v) for v in vec):
+                raise ValueError("Embedding vector contains non-finite coordinate(s).")
+            norm_sq = sum(v * v for v in vec)
+            if norm_sq <= 0.0:
+                raise ValueError("Embedding vector has zero L2 norm.")
+            all_vectors.append(vec)
 
     return all_vectors
 
@@ -283,6 +338,139 @@ def _insert_chunks(chunks_with_vecs: list[dict], supabase_url: str,
     return inserted
 
 
+def _fetch_existing_chunks(
+    supabase_url: str,
+    supabase_key: str,
+    resource_id: Optional[str] = None,
+    page_size: int = 500,
+) -> list[dict]:
+    """
+    Fetch existing `resource_chunks` rows (explicit columns, deterministic order)
+    using paginated PostgREST GET requests.
+    """
+    validated_resource_id = (
+        _validate_uuid(resource_id, "resource_id") if resource_id else None
+    )
+    h = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+    }
+    base_url = f"{supabase_url.rstrip('/')}/rest/v1/resource_chunks"
+    chunks: list[dict] = []
+    offset = 0
+
+    while True:
+        params: dict[str, str] = {
+            "select": "id,resource_id,chunk_index,chunk_type,chunk_text",
+            "order": "resource_id.asc,chunk_index.asc,id.asc",
+            "limit": str(page_size),
+            "offset": str(offset),
+        }
+        if validated_resource_id:
+            params["resource_id"] = f"eq.{validated_resource_id}"
+
+        resp = requests.get(base_url, headers=h, params=params, timeout=30)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Failed to fetch resource_chunks (status {resp.status_code})"
+            )
+        batch = resp.json()
+        if not isinstance(batch, list):
+            raise RuntimeError("Unexpected non-list response from resource_chunks.")
+        chunks.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    return chunks
+
+
+def reembed_existing_chunks(
+    supabase_url: str,
+    supabase_key: str,
+    nvidia_key: str,
+    resource_id: Optional[str] = None,
+    model: Optional[str] = None,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Re-embed existing rows in `resource_chunks` in-place via PATCH by row `id`.
+
+    Preserves row IDs, chunk metadata, source_refs, token_count, and created_at.
+    Returns: {fetched, embedded, updated, failed, model, dry_run}
+    """
+    active_model = _resolve_embed_model(model)
+    chunks = _fetch_existing_chunks(
+        supabase_url, supabase_key, resource_id=resource_id
+    )
+    print(f"  Fetched {len(chunks)} existing chunk(s) (model={active_model}, dry_run={dry_run})")
+
+    if dry_run or not chunks:
+        return {
+            "fetched": len(chunks),
+            "embedded": 0,
+            "updated": 0,
+            "failed": 0,
+            "model": active_model,
+            "dry_run": dry_run,
+        }
+
+    texts = [c["chunk_text"] for c in chunks]
+    print(f"  Embedding {len(texts)} existing chunk(s) via {active_model}...")
+    vectors = _embed_texts(texts, nvidia_key, model=active_model)
+    print(f"  Received {len(vectors)} validated embedding vector(s) (dim={len(vectors[0])})")
+
+    base_url = f"{supabase_url.rstrip('/')}/rest/v1/resource_chunks"
+    patch_headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+    updated = 0
+    failed = 0
+    for chunk, vec in zip(chunks, vectors):
+        chunk_id = _validate_uuid(str(chunk["id"]), "chunk_id")
+        try:
+            resp = requests.patch(
+                base_url,
+                headers=patch_headers,
+                params={"id": f"eq.{chunk_id}"},
+                json={"embedding": _vector_to_pg_string(vec)},
+                timeout=15,
+            )
+            if resp.status_code in (200, 204):
+                updated += 1
+            else:
+                failed += 1
+                print(
+                    f"  ERROR updating chunk {chunk_id}: HTTP {resp.status_code}"
+                )
+        except requests.RequestException as exc:
+            failed += 1
+            print(
+                f"  ERROR updating chunk {chunk_id}: "
+                f"{_sanitize_error(exc, (supabase_key, nvidia_key))}"
+            )
+
+    if failed > 0:
+        raise RuntimeError(
+            f"Re-embedding partially failed: updated={updated}, failed={failed}"
+        )
+
+    print(f"  Updated {updated}/{len(chunks)} existing row(s) in-place.")
+    return {
+        "fetched": len(chunks),
+        "embedded": len(vectors),
+        "updated": updated,
+        "failed": failed,
+        "model": active_model,
+        "dry_run": False,
+    }
+
+
 # ------------------------------------------------------------------
 # Main pipeline
 # ------------------------------------------------------------------
@@ -295,16 +483,19 @@ def embed_resource(resource_id: str, supabase_url: str,
 
     Returns: {chunked: int, embedded: int, stored: int}
     """
+    validated_resource_id = _validate_uuid(resource_id, "resource_id")
+    active_model = _resolve_embed_model()
+
     # 1. Fetch resource content
     h = {
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
     }
-    endpoint = f"{supabase_url}/rest/v1/resources?id=eq.{resource_id}&select=content,title"
+    endpoint = f"{supabase_url}/rest/v1/resources?id=eq.{validated_resource_id}&select=content,title"
     resp = requests.get(endpoint, headers=h, timeout=15)
     if resp.status_code != 200 or not resp.json():
-        raise RuntimeError(f"Cannot fetch resource {resource_id}")
+        raise RuntimeError(f"Cannot fetch resource {validated_resource_id}")
 
     row = resp.json()[0]
     content = row.get("content")
@@ -330,15 +521,15 @@ def embed_resource(resource_id: str, supabase_url: str,
 
     # 3. Embed
     texts = [c["chunk_text"] for c in chunks]
-    print(f"  Embedding {len(texts)} chunks via {EMBED_MODEL}...")
-    vectors = _embed_texts(texts, nvidia_key)
+    print(f"  Embedding {len(texts)} chunks via {active_model}...")
+    vectors = _embed_texts(texts, nvidia_key, model=active_model)
     print(f"  Received {len(vectors)} embedding vectors (dim={len(vectors[0])})")
 
     # 4. Assemble payload
     rows = []
     for chunk, vec in zip(chunks, vectors):
         rows.append({
-            "resource_id": resource_id,
+            "resource_id": validated_resource_id,
             "chunk_index": chunk["chunk_index"],
             "chunk_text": chunk["chunk_text"],
             "chunk_type": chunk["chunk_type"],
@@ -348,7 +539,7 @@ def embed_resource(resource_id: str, supabase_url: str,
         })
 
     # 5. Delete existing (idempotent)
-    _delete_existing_chunks(resource_id, supabase_url, supabase_key)
+    _delete_existing_chunks(validated_resource_id, supabase_url, supabase_key)
 
     # 6. Insert
     print(f"  Inserting {len(rows)} rows into resource_chunks...")
@@ -365,6 +556,7 @@ def embed_resource(resource_id: str, supabase_url: str,
 def verify_chunks(resource_id: str, supabase_url: str,
                   supabase_key: str) -> list[dict]:
     """Query resource_chunks for a given resource_id — for verification."""
+    validated_resource_id = _validate_uuid(resource_id, "resource_id")
     h = {
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}",
@@ -372,7 +564,7 @@ def verify_chunks(resource_id: str, supabase_url: str,
     }
     endpoint = (
         f"{supabase_url}/rest/v1/resource_chunks"
-        f"?resource_id=eq.{resource_id}"
+        f"?resource_id=eq.{validated_resource_id}"
         f"&select=id,chunk_index,chunk_type,chunk_text,token_count"
         f"&order=chunk_index.asc"
     )
@@ -388,15 +580,20 @@ def verify_chunks(resource_id: str, supabase_url: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run the chunk embedding pipeline for a resource."
+        description="Run the chunk embedding pipeline for a resource or re-embed existing chunks."
     )
-    parser.add_argument("--resource-id", type=str,
-                        default="5729d034-a6c7-4f35-b81c-fcac447289c7",
-                        help="UUID of the resource to embed")
+    parser.add_argument("--resource-id", type=str, default=None,
+                        help="UUID of the resource to embed (or filter when using --reembed-existing)")
     parser.add_argument("--env", type=str, default=None,
                         help="Path to .env file")
     parser.add_argument("--verify", action="store_true",
                         help="Only verify existing chunks (no embedding)")
+    parser.add_argument("--reembed-existing", action="store_true",
+                        help="Re-embed all existing rows in resource_chunks in-place")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Inspect target chunks and model without calling NVIDIA or mutating DB")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Optional embedding model override")
     args = parser.parse_args()
 
     # Load env
@@ -412,9 +609,26 @@ def main():
         print("ERROR: Missing Supabase credentials in backend/.env")
         sys.exit(1)
 
+    if args.reembed_existing:
+        if not args.dry_run and not nvidia_key:
+            print("ERROR: Missing NVIDIA_API_KEY for embeddings")
+            sys.exit(1)
+        result = reembed_existing_chunks(
+            supabase_url=supabase_url,
+            supabase_key=supabase_key,
+            nvidia_key=nvidia_key or "",
+            resource_id=args.resource_id,
+            model=args.model,
+            dry_run=args.dry_run,
+        )
+        print(f"\nDone: {result}")
+        return
+
+    target_resource_id = args.resource_id or "5729d034-a6c7-4f35-b81c-fcac447289c7"
+
     if args.verify:
-        rows = verify_chunks(args.resource_id, supabase_url, supabase_key)
-        print(f"resource_chunks for {args.resource_id}: {len(rows)} rows")
+        rows = verify_chunks(target_resource_id, supabase_url, supabase_key)
+        print(f"resource_chunks for {target_resource_id}: {len(rows)} rows")
         for r in rows:
             print(f"  [{r['chunk_index']}] {r['chunk_type']}: "
                   f"{r['chunk_text'][:80]}... ({r['token_count']} tokens)")
@@ -424,7 +638,7 @@ def main():
         print("ERROR: Missing NVIDIA_API_KEY for embeddings")
         sys.exit(1)
 
-    result = embed_resource(args.resource_id, supabase_url, supabase_key, nvidia_key)
+    result = embed_resource(target_resource_id, supabase_url, supabase_key, nvidia_key)
     print(f"\nDone: {result}")
 
 
