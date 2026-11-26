@@ -22,6 +22,8 @@ GitHub Issues are the source of truth for queued work. Run `gh` commands from th
 
 At the start of every session, run `gh issue view <number> --comments` to read the
 full specification, acceptance criteria, and prior discussion before changing code.
+(On `gh` CLI versions affected by the Projects (classic) GraphQL deprecation, pass
+`--json number,state,title,body,comments`.)
 
 ### Progress and handoff trace
 
@@ -59,14 +61,31 @@ no exceptions:
    root). No issue → no change.
 2. **Reference the issue in the commit message.** The commit that lands the change
    MUST include `Closes #<issue_number>` in its message.
-3. **Push to the active branch.** The active branch is `multimodalragsystem`.
-   Push the commit to `origin multimodalragsystem`.
-4. **Verify closure.** After pushing, run `gh issue view <issue_number>` to confirm
-   the issue is closed. Because `multimodalragsystem` is not the default branch
-   (`main`), GitHub's auto-close does not fire: close it explicitly with
-   `gh issue close <issue_number>` and re-verify with `gh issue view <issue_number>`.
+3. **Push to the active branch.** The single active production branch is `main`
+   (the repository default branch). Push the commit to `origin main`.
+4. **Verify closure.** After pushing to `origin main`, run
+   `gh issue view <issue_number> --json number,state,title,url` to confirm
+   the issue closed automatically via `Closes #<issue_number>`. If GitHub
+   has not closed it (or when pushing to a non-default branch), close it
+   explicitly with `gh issue close <issue_number>` and re-verify with
+   `gh issue view <issue_number> --json number,state,title,url`.
    Same-session verification is part of the change — an unverified workflow is an
    incomplete change.
+
+## Production Branch & Deployment Alignment
+
+`main` is the single production branch for this repository:
+
+- **Backend (Render):** Deployed from `main` via root `render.yaml`
+  (`name: alsini-physics-backend`, `rootDir: backend`, Python `3.11.15` from
+  `.python-version`, `buildCommand: pip install -r requirements.txt`,
+  `startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT`,
+  `healthCheckPath: /health`). Never commit secrets; keep secret env vars
+  marked `sync: false` in `render.yaml` and managed in the Render Dashboard.
+- **Frontend (Vercel):** Deployed from `main` with Root Directory `frontend`
+  (Vite build, SPA rewrite in `frontend/vercel.json`).
+- **Legacy history:** Pre-promotion `main` (`6090fa1`) is preserved on `origin`
+  under tag `archive/legacy-main-pre-promotion`.
 
 ## `.vercel` Artifacts
 

@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: alsini-physics-backend
+    runtime: python
+    plan: free
+    branch: main
+    rootDir: backend
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.15"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: OPENCODE_ZEN_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://eduvle.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+      - key: OPENCODE_ZEN_MODEL
+        value: deepseek-v4.1-flash-free
+      - key: NVIDIA_CHAT_MODEL
+        value: nvidia/nemotron-3.5-super-vl-120b-a12b
+      - key: NVIDIA_FALLBACK_CHAT_MODEL
+        value: nvidia/nemotron-3.5-bolt-e4b
+      - key: GEMINI_CHAT_MODEL
+        value: gemini-2.5-flash
+      - key: NVIDIA_EMBED_MODEL
+        value: nvidia/nemotron-3.5-embed-1b
+      - key: LLM_TIMEOUT_SECONDS
+        value: "30"
