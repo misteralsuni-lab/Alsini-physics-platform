@@ -15,6 +15,47 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+try:
+    from backend.chapter_context import (
+        ACTIVE_EMBEDDING_MODEL,
+        ALL_CANONICAL_CITATION_PREFIXES,
+        CHAPTER1_FORMULA_ALLOWLIST,
+        FORMULA_REF_ALLOWLIST,
+        CanonicalFormula,
+        InteractiveState,
+        UnknownFormulaRefError,
+        assign_canonical_citation_labels,
+        build_interactive_state_preamble,
+        canonical_citation_label,
+        canonical_citation_prefix,
+        extract_citation_labels,
+        formula_to_synthetic_chunk,
+        rank_chunks_lexically,
+        resolve_formula_ref,
+        tokenize_lexical_query,
+        verify_response_citations,
+    )
+except ImportError:
+    from chapter_context import (  # type: ignore[no-redef]
+        ACTIVE_EMBEDDING_MODEL,
+        ALL_CANONICAL_CITATION_PREFIXES,
+        CHAPTER1_FORMULA_ALLOWLIST,
+        FORMULA_REF_ALLOWLIST,
+        CanonicalFormula,
+        InteractiveState,
+        UnknownFormulaRefError,
+        assign_canonical_citation_labels,
+        build_interactive_state_preamble,
+        canonical_citation_label,
+        canonical_citation_prefix,
+        extract_citation_labels,
+        formula_to_synthetic_chunk,
+        rank_chunks_lexically,
+        resolve_formula_ref,
+        tokenize_lexical_query,
+        verify_response_citations,
+    )
+
 # Load environment variables
 load_dotenv()
 
@@ -259,6 +300,9 @@ class LearningContext(BaseModel):
     focused_asset_type: Optional[str] = None
     focused_question: Optional[str] = None
     page: Optional[int] = None
+    # Strictly typed interactive telemetry (Chapter 1 Vertical Slice — ADR-0002).
+    # Optional for full backwards compatibility when omitted (None).
+    interactive_state: Optional[InteractiveState] = None
 
 class TutorRequest(BaseModel):
     student_prompt: str
@@ -291,6 +335,13 @@ class TutorSource(BaseModel):
     asset_id: Optional[str] = None
     asset_url: Optional[str] = None
     asset_label: Optional[str] = None
+    # Server-canonical citation provenance (Chapter 1 Unified RAG — ADR-0002).
+    citation_label: Optional[str] = None
+    source_type: Optional[str] = None
+    chapter_id: Optional[str] = None
+    block_id: Optional[str] = None
+    spec_refs: Optional[List[str]] = None
+    embedding_model: Optional[str] = None
 
 class TutorResponse(BaseModel):
     response: str
@@ -332,19 +383,33 @@ _LEXICAL_STOPWORDS = frozenset({
 # -------------------------------------------------------------------
 
 
+_ALLOWED_SOURCE_TYPES = frozenset({
+    "worksheet",
+    "lesson_block",
+    "practical",
+    "examiner_note",
+    "worked_example",
+})
+
+
+def _validate_source_types(source_types: Optional[list[str]]) -> Optional[list[str]]:
+    if not source_types:
+        return None
+    cleaned: list[str] = []
+    for raw in source_types:
+        val = (raw or "").strip().lower()
+        if not val:
+            continue
+        if val not in _ALLOWED_SOURCE_TYPES:
+            raise HTTPException(status_code=400, detail=f"Invalid source_type: {val}")
+        if val not in cleaned:
+            cleaned.append(val)
+    return cleaned or None
+
+
 def _tokenize_search_query(query: str) -> list[str]:
     """Extract meaningful lowercase tokens for lexical chunk matching."""
-    raw_tokens = re.findall(r"[a-z0-9]+", (query or "").lower())
-    tokens: list[str] = []
-    for idx, tok in enumerate(raw_tokens):
-        if tok in _LEXICAL_STOPWORDS:
-            continue
-        if len(tok) >= 2:
-            tokens.append(tok)
-        elif idx > 0 and raw_tokens[idx - 1] == "question" and tok.isdigit():
-            tokens.append(f"q{tok}")
-    # Deduplicate while preserving order
-    return list(dict.fromkeys(tokens))
+    return tokenize_lexical_query(query)
 
 
 def _lexical_search_chunks(
@@ -353,26 +418,46 @@ def _lexical_search_chunks(
     resource_id: Optional[str] = None,
     chunk_type: Optional[str] = None,
     resource_ids: Optional[list[str]] = None,
+    chapter_id: Optional[str] = None,
+    source_types: Optional[list[str]] = None,
+    target_spec_refs: Optional[list[str]] = None,
 ) -> tuple[list[dict], bool]:
     """
-    Fallback lexical/relational retrieval over `resource_chunks` via PostgREST.
+    Deterministic fallback lexical/relational retrieval over `resource_chunks` via PostgREST.
 
-    Used when vector embedding fails (e.g. upstream provider outage/EOL) or
-    when stored vectors do not align with the active embedding model space.
-    Returns (ranked_chunks, supabase_reachable).
+    Used when vector embedding fails (e.g. upstream provider outage/EOL), when
+    `embedding_model` mismatches stored chunk vectors, or when vector retrieval
+    returns zero model-matched hits. Ranks deterministically via normalized
+    token + spec_refs overlap with stable `(similarity DESC, chunk_index ASC, id ASC)`
+    tie-breaking. Returns (ranked_chunks, supabase_reachable).
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
         return [], False
 
     tokens = _tokenize_search_query(query)
-    if not tokens:
+    if not tokens and not target_spec_refs:
         return [], True
 
-    params: dict[str, str] = {
-        "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
-        "order": "chunk_index.asc",
-        "limit": "200",
-    }
+    if chapter_id:
+        params: dict[str, str] = {
+            "select": (
+                "id,resource_id,chapter_id,block_id,source_type,spec_refs,"
+                "embedding_model,chunk_index,chunk_text,chunk_type,source_refs,token_count"
+            ),
+            "chapter_id": f"eq.{chapter_id}",
+            "order": "chunk_index.asc,id.asc",
+            "limit": "200",
+        }
+        validated_types = _validate_source_types(source_types)
+        if validated_types:
+            params["source_type"] = f"in.({','.join(validated_types)})"
+    else:
+        params = {
+            "select": "id,resource_id,chunk_index,chunk_text,chunk_type,source_refs,token_count",
+            "order": "chunk_index.asc",
+            "limit": "200",
+        }
+
     if resource_id:
         params["resource_id"] = f"eq.{resource_id}"
     elif resource_ids:
@@ -396,67 +481,146 @@ def _lexical_search_chunks(
         return [], False
 
     rows = _safe_json_list(resp)
-    query_lower = query.strip().lower()
-    scored: list[dict] = []
-
-    def _token_matches(tok: str, word_set: set[str]) -> bool:
-        if tok in word_set:
-            return True
-        if len(tok) >= 4:
-            return any(w.startswith(tok) for w in word_set)
-        return False
-
-    for row in rows:
-        chunk_text = row.get("chunk_text") or ""
-        text_lower = chunk_text.lower()
-        text_words = set(re.findall(r"[a-z0-9]+", text_lower))
-        source_refs = row.get("source_refs") or {}
-        concept_lower = str(source_refs.get("concept") or "").lower()
-        concept_words = set(re.findall(r"[a-z0-9]+", concept_lower))
-
-        text_hits = sum(1 for tok in tokens if _token_matches(tok, text_words))
-        concept_hits = sum(1 for tok in tokens if _token_matches(tok, concept_words))
-        if text_hits == 0 and concept_hits == 0:
-            continue
-
-        score = (
-            0.40
-            + 0.35 * (text_hits / len(tokens))
-            + 0.15 * (concept_hits / len(tokens))
-        )
-        if len(query_lower) >= 3 and query_lower in text_lower:
-            score += 0.05
-
-        item = dict(row)
-        item["similarity"] = min(0.95, round(score, 4))
-        scored.append(item)
-
-    scored.sort(
-        key=lambda c: (c.get("similarity") or 0.0, -(c.get("chunk_index") or 0)),
-        reverse=True,
+    ranked = rank_chunks_lexically(
+        rows,
+        query,
+        target_spec_refs=target_spec_refs,
+        match_count=match_count,
     )
-    return scored[:match_count], True
+    return ranked, True
+
+
+def _retrieve_chapter_chunks(
+    query: str,
+    chapter_id: str,
+    match_count: int = TUTOR_CHUNK_COUNT,
+    source_types: Optional[list[str]] = None,
+    spec_refs: Optional[list[str]] = None,
+    embedding_model: Optional[str] = None,
+    match_threshold: float = VECTOR_MIN_RELEVANCE,
+) -> list[dict]:
+    """
+    Chapter-scoped, model-tagged Unified RAG retrieval via `match_chapter_chunks`.
+
+    Strictly filters vectors by `filter_chapter_id` and `filter_embedding_model`
+    (defaulting to the active `EMBED_MODEL`, e.g. `nvidia/nemotron-3.5-embed-1b`).
+    If embedding fails, returns zero model-matched hits, or encounters any
+    `embedding_model` mismatch, deterministically falls back to lexical +
+    `spec_refs` ranking over chapter chunks rather than returning mixed-model
+    cosine noise.
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        logger.warning("[RAG] Supabase credentials not configured — skipping chapter retrieval.")
+        return []
+
+    active_model = (embedding_model or EMBED_MODEL or ACTIVE_EMBEDDING_MODEL).strip()
+    validated_types = _validate_source_types(source_types)
+    vector_chunks: list[dict] = []
+
+    if nvidia_client:
+        try:
+            query_vec = _embed_query(query)
+            vec_str = _vector_to_pg_str(query_vec)
+
+            rpc_body: dict = {
+                "query_embedding": vec_str,
+                "filter_chapter_id": chapter_id,
+                "filter_embedding_model": active_model,
+                "match_threshold": match_threshold,
+                "match_count": min(match_count, 10),
+            }
+            if validated_types:
+                rpc_body["filter_source_types"] = validated_types
+            if spec_refs:
+                rpc_body["filter_spec_refs"] = list(spec_refs)
+
+            resp = requests.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/match_chapter_chunks",
+                headers=_supabase_headers(),
+                json=rpc_body,
+                timeout=12,
+            )
+            if resp.status_code == 200:
+                raw_chunks = _safe_json_list(resp)
+                # Defense-in-depth: reject any chunk whose embedding_model does
+                # not strictly match the active query embedding model.
+                for chunk in raw_chunks:
+                    if chunk.get("embedding_model") == active_model:
+                        chunk.setdefault("chapter_id", chapter_id)
+                        vector_chunks.append(chunk)
+                dropped = len(raw_chunks) - len(vector_chunks)
+                if dropped > 0:
+                    logger.warning(
+                        "[RAG] Dropped %d chapter chunk(s) due to embedding_model mismatch (expected %s).",
+                        dropped,
+                        active_model,
+                    )
+            else:
+                logger.warning(
+                    "[RAG] Chapter vector RPC failed with status %s; falling back to lexical.",
+                    resp.status_code,
+                )
+        except (HTTPException, Exception) as exc:
+            logger.warning(
+                "[RAG] Chapter vector retrieval error (non-fatal): %s",
+                _sanitize_error_text(exc),
+            )
+    else:
+        logger.warning("[RAG] NVIDIA API not configured — using deterministic lexical chapter fallback.")
+
+    max_vector_sim = max(
+        (c.get("similarity") or 0.0 for c in vector_chunks),
+        default=0.0,
+    )
+    if vector_chunks and max_vector_sim >= match_threshold:
+        vector_chunks.sort(
+            key=lambda c: (
+                -(c.get("similarity") or 0.0),
+                int(c["chunk_index"]) if c.get("chunk_index") is not None else 10**9,
+                str(c.get("id") or ""),
+            )
+        )
+        return vector_chunks[:match_count]
+
+    lexical_chunks, _ = _lexical_search_chunks(
+        query,
+        match_count=match_count,
+        chapter_id=chapter_id,
+        source_types=validated_types,
+        target_spec_refs=spec_refs,
+    )
+    return lexical_chunks
 
 
 def _retrieve_relevant_chunks(
     query: str,
     match_count: int = TUTOR_CHUNK_COUNT,
     resource_id: Optional[str] = None,
+    chapter_id: Optional[str] = None,
+    source_types: Optional[list[str]] = None,
+    spec_refs: Optional[list[str]] = None,
 ) -> list[dict]:
     """
-    Embed the student's question, call match_resource_chunks RPC, and
-    return ranked chunks for RAG context. Falls back to lexical PostgREST
-    retrieval if vector search fails or returns cross-model noise.
+    Embed the student's question and return ranked chunks for RAG context.
 
-    Retrieval scope is dynamic:
-      - If `resource_id` is provided, retrieval is scoped to the CURRENTLY
-        SELECTED worksheet only (dynamic tutor scope).
-      - If `resource_id` is None, retrieval is unscoped (returns chunks
-        across all resources) — used as a fallback when the frontend
-        has not resolved a worksheet yet.
+    Retrieval scope:
+      - If `chapter_id` is provided, uses chapter-scoped model-tagged retrieval
+        (`match_chapter_chunks` filtered by active `EMBED_MODEL`) with
+        deterministic lexical fallback on mismatch or empty vector results.
+      - Otherwise, preserves the legacy 3-arg `match_resource_chunks` RPC path
+        scoped to `resource_id` (or unscoped when absent).
 
     Returns empty list on any failure (non-fatal — tutor still works).
     """
+    if chapter_id:
+        return _retrieve_chapter_chunks(
+            query=query,
+            chapter_id=chapter_id,
+            match_count=match_count,
+            source_types=source_types,
+            spec_refs=spec_refs,
+        )
+
     if not SUPABASE_URL or not SUPABASE_KEY:
         logger.warning("[RAG] Supabase credentials not configured — skipping retrieval.")
         return []
@@ -521,51 +685,75 @@ def _format_chunks_as_context(chunks: list[dict]) -> str:
     """Build a compact, citation-rich context block from retrieved chunks."""
     if not chunks:
         return ""
+    assign_canonical_citation_labels(chunks)
     lines = ["Retrieved educational context:"]
     for i, c in enumerate(chunks):
-        idx = i + 1
-        ctype = c.get("chunk_type", "concept")
+        label = c.get("citation_label") or canonical_citation_label(c, i + 1)
+        ctype = c.get("source_type") or c.get("chunk_type", "concept")
         text = c.get("chunk_text", "")
         sources = c.get("source_refs", {}) or {}
         concept = sources.get("concept", "")
         page = sources.get("page")
+        spec_refs = c.get("spec_refs")
 
         # Build a tight citation suffix
         cite_parts = []
         if concept:
             cite_parts.append(f"concept: {concept}")
+        if spec_refs:
+            cite_parts.append(f"spec: {', '.join(str(s) for s in spec_refs)}")
+        elif sources.get("spec_point"):
+            cite_parts.append(f"spec: {sources.get('spec_point')}")
         if page is not None:
             cite_parts.append(f"page {page}")
         cite_str = f" [{', '.join(cite_parts)}]" if cite_parts else ""
 
-        lines.append(f"  [{idx}] ({ctype}){cite_str}  {text}")
+        lines.append(f"  [{label}] ({ctype}){cite_str}  {text}")
     return "\n".join(lines)
 
 
 def _chunks_to_sources(chunks: list[dict]) -> list[TutorSource]:
-    """Extract source metadata from retrieved chunks for the response."""
-    return [
-        TutorSource(
-            chunk_id=str(c.get("id", "")),
-            concept=(c.get("source_refs") or {}).get("concept"),
-            page=(c.get("source_refs") or {}).get("page"),
-            chunk_type=c.get("chunk_type", "concept"),
-            similarity=c.get("similarity"),
-            # Traceability fields for developer-mode citation expansion.
-            resource_id=c.get("resource_id"),
-            resource_title=c.get("resource_title"),
-            specification_point_id=c.get("specification_point_id"),
-            specification_point_ref=(
-                c.get("specification_point_ref")
-                or (c.get("source_refs") or {}).get("spec_point")
-            ),
-            chunk_index=c.get("chunk_index"),
-            asset_id=c.get("asset_id"),
-            asset_url=c.get("asset_url"),
-            asset_label=c.get("asset_label"),
+    """Extract source metadata and server-canonical citation labels from chunks."""
+    assign_canonical_citation_labels(chunks)
+    results: list[TutorSource] = []
+    for i, c in enumerate(chunks):
+        sr = c.get("source_refs") or {}
+        raw_spec_refs = c.get("spec_refs")
+        spec_refs_list = (
+            [str(s) for s in raw_spec_refs if s]
+            if isinstance(raw_spec_refs, list) and raw_spec_refs
+            else None
         )
-        for c in chunks
-    ]
+        spec_point_ref = (
+            c.get("specification_point_ref")
+            or sr.get("spec_point")
+            or (", ".join(spec_refs_list) if spec_refs_list else None)
+        )
+        results.append(
+            TutorSource(
+                chunk_id=str(c.get("id", "")),
+                concept=sr.get("concept"),
+                page=sr.get("page"),
+                chunk_type=c.get("chunk_type", "concept"),
+                similarity=c.get("similarity"),
+                # Traceability fields for developer-mode citation expansion.
+                resource_id=c.get("resource_id"),
+                resource_title=c.get("resource_title"),
+                specification_point_id=c.get("specification_point_id"),
+                specification_point_ref=spec_point_ref,
+                chunk_index=c.get("chunk_index"),
+                asset_id=c.get("asset_id"),
+                asset_url=c.get("asset_url"),
+                asset_label=c.get("asset_label"),
+                citation_label=c.get("citation_label") or canonical_citation_label(c, i + 1),
+                source_type=c.get("source_type"),
+                chapter_id=c.get("chapter_id"),
+                block_id=c.get("block_id"),
+                spec_refs=spec_refs_list,
+                embedding_model=c.get("embedding_model"),
+            )
+        )
+    return results
 
 
 # -------------------------------------------------------------------
@@ -1196,6 +1384,28 @@ def tutor_endpoint(
             detail="resource_id conflicts with learning_context.resource_id.",
         )
     effective_resource_id = ctx_resource_id or top_resource_id
+    effective_chapter_id = (
+        _normalize_optional_uuid(ctx.chapter_id, "learning_context.chapter_id")
+        if ctx
+        else None
+    )
+    interactive_state = ctx.interactive_state if ctx else None
+    effective_block_id = (
+        (interactive_state.block_id if interactive_state and interactive_state.block_id else None)
+        or (ctx.block_id if ctx else None)
+    )
+
+    # Fail-closed server-side formula_ref resolution (ADR-0002).
+    # Pydantic already validates InteractiveState.formula_ref against the server
+    # allowlist; this defense-in-depth check ensures no unapproved or spoofed
+    # formula_ref can ever enter the prompt even if constructed bypassingly.
+    resolved_formula: Optional[CanonicalFormula] = None
+    if interactive_state and interactive_state.formula_ref:
+        try:
+            resolved_formula = resolve_formula_ref(interactive_state.formula_ref, fail_closed=True)
+        except UnknownFormulaRefError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     if ctx and ctx.focused_asset:
         ctx.focused_asset = _normalize_optional_uuid(ctx.focused_asset, "learning_context.focused_asset")
     if ctx and ctx.focused_asset and not effective_resource_id:
@@ -1205,47 +1415,61 @@ def tutor_endpoint(
         ctx.resource_id = effective_resource_id
 
     # --- RAG Retrieval ---
-    # Replace the old full-JSON dump with targeted hybrid retrieval.
-    # Dynamic scope: pass the effective resource_id so the tutor
-    # grounds its answer in the CURRENTLY SELECTED worksheet, not a
-    # hardcoded resource.
+    # When chapter_id is present, use chapter-scoped model-tagged retrieval
+    # (`match_chapter_chunks` filtered by active EMBED_MODEL) with deterministic
+    # lexical fallback. Otherwise preserve the legacy resource-scoped
+    # `match_resource_chunks` path.
+    effective_spec_refs = (
+        list(interactive_state.spec_refs)
+        if (interactive_state and interactive_state.spec_refs)
+        else None
+    )
     retrieved_chunks = _retrieve_relevant_chunks(
         student_prompt,
         resource_id=effective_resource_id,
+        chapter_id=effective_chapter_id,
+        spec_refs=effective_spec_refs,
     )
 
     # --- Asset Grounding (Task 5) ---
-    # When the student is focused on a graph / figure / table / diagram
-    # / equation, fetch the connected educational objects (caption,
-    # on-page chunks, linked question, governing equation) and prepend
-    # them to the RAG context so the tutor can reason from the visible
-    # asset directly.
+    # Static PDF focused_asset verification remains 100% fail-closed.
     grounded_chunks: list[dict] = []
     if ctx and ctx.focused_asset:
         grounded_chunks = _ground_focused_asset(ctx)
-        if grounded_chunks:
-            # Grounded chunks come first — they describe the thing the
-            # student is actually looking at. RAG chunks fill in the
-            # surrounding curriculum context.
-            deduped = list(grounded_chunks)
-            existing_ids = {c.get("id") for c in deduped if c.get("id")}
-            for rc in retrieved_chunks:
-                if rc.get("id") not in existing_ids:
-                    deduped.append(rc)
-            retrieved_chunks = deduped
+
+    # Prepend server-grounded chunks (focused asset + allowlisted formula)
+    # before retrieved RAG chunks, deduplicated by chunk id.
+    prefix_chunks: list[dict] = list(grounded_chunks)
+    if resolved_formula is not None:
+        prefix_chunks.append(
+            formula_to_synthetic_chunk(
+                resolved_formula,
+                chapter_id=effective_chapter_id,
+                block_id=effective_block_id,
+            )
+        )
+    if prefix_chunks:
+        deduped = list(prefix_chunks)
+        existing_ids = {c.get("id") for c in deduped if c.get("id")}
+        for rc in retrieved_chunks:
+            if rc.get("id") not in existing_ids:
+                deduped.append(rc)
+        retrieved_chunks = deduped
 
     # Enrich chunks with resource title + specification-point reference
     # so student-mode citations can show "Resource title · p.N · spec"
     # without a second round-trip on the frontend.
     _enrich_chunks_with_resource_meta(retrieved_chunks, effective_resource_id)
 
+    assign_canonical_citation_labels(retrieved_chunks)
     rag_context = _format_chunks_as_context(retrieved_chunks)
     sources = _chunks_to_sources(retrieved_chunks)
 
     logger.info(
-        "[RAG] Retrieved %d chunks for tutor context (grounded=%d).",
+        "[RAG] Retrieved %d chunks for tutor context (grounded=%d, formula_grounded=%s).",
         len(retrieved_chunks),
         len(grounded_chunks),
+        bool(resolved_formula),
     )
 
     # --- Tutor context preamble (Tasks 1 & 4) ---
@@ -1308,6 +1532,12 @@ def tutor_endpoint(
                 f"Ground your guidance in that content.\n\n"
             )
 
+        if interactive_state is not None:
+            context_preamble += build_interactive_state_preamble(
+                interactive_state,
+                resolved_formula=resolved_formula,
+            )
+
     # Build system prompt — tutor persona + context preamble + RAG context
     # (NOT the full JSON). The persona follows AI_SYSTEM_ARCHITECTURE.md:
     # teach, guide, question, support — never simply give answers.
@@ -1327,9 +1557,10 @@ def tutor_endpoint(
     if rag_context:
         system_prompt += (
             "\n"
-            "When citing a fact from the retrieved context below, reference the source number "
-            "in brackets (e.g. [Source 1]).  Do NOT invent or guess page numbers — only use "
-            "information explicitly present in the retrieved context.\n"
+            "When citing a fact from the retrieved context below, reference its server-canonical "
+            "citation ID in brackets (e.g. [BLK-01], [PRC-01], [EXM-01], [WE-01], [EQ-CH1-01], "
+            "[FIG-A01], [TAB-01], [QN-01], [SRC-A01]). Do NOT invent citation IDs or page numbers "
+            "— only use information explicitly present in the retrieved context.\n"
             "\n"
             + rag_context + "\n"
         )
@@ -1486,6 +1717,9 @@ class HybridSearchRequest(BaseModel):
     query: str
     match_count: int = 10
     resource_id: Optional[str] = None
+    chapter_id: Optional[str] = None
+    source_types: Optional[List[str]] = None
+    spec_refs: Optional[List[str]] = None
     # Relational filters
     spec_point_id: Optional[str] = None
     chunk_type: Optional[str] = None
@@ -1582,8 +1816,11 @@ def hybrid_search(
         raise HTTPException(status_code=503, detail="Database service is not configured.")
 
     resource_id = _normalize_optional_uuid(request.resource_id, "resource_id")
+    chapter_id = _normalize_optional_uuid(request.chapter_id, "chapter_id")
     spec_point_id = _normalize_optional_uuid(request.spec_point_id, "spec_point_id")
     chunk_type = _validate_asset_type(request.chunk_type) if (request.chunk_type and request.chunk_type.strip()) else None
+    source_types = _validate_source_types(request.source_types)
+    spec_refs = [s.strip() for s in (request.spec_refs or []) if s and s.strip()] or None
     match_count = max(1, min(request.match_count, 50))
 
     headers = _supabase_headers()
@@ -1596,21 +1833,43 @@ def hybrid_search(
             query_vec = _embed_query(query)
             vec_str = _vector_to_pg_str(query_vec)
 
-            rpc_body = {
-                "query_embedding": vec_str,
-                "match_count": match_count * 2,  # fetch more for merging
-            }
-            if resource_id:
-                rpc_body["filter_resource_id"] = resource_id
+            if chapter_id:
+                active_model = (EMBED_MODEL or ACTIVE_EMBEDDING_MODEL).strip()
+                rpc_body = {
+                    "query_embedding": vec_str,
+                    "filter_chapter_id": chapter_id,
+                    "filter_embedding_model": active_model,
+                    "match_threshold": VECTOR_MIN_RELEVANCE,
+                    "match_count": match_count * 2,
+                }
+                if source_types:
+                    rpc_body["filter_source_types"] = source_types
+                if spec_refs:
+                    rpc_body["filter_spec_refs"] = spec_refs
+                rpc_endpoint = f"{SUPABASE_URL}/rest/v1/rpc/match_chapter_chunks"
+            else:
+                rpc_body = {
+                    "query_embedding": vec_str,
+                    "match_count": match_count * 2,  # fetch more for merging
+                }
+                if resource_id:
+                    rpc_body["filter_resource_id"] = resource_id
+                rpc_endpoint = f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks"
 
             rpc_resp = requests.post(
-                f"{SUPABASE_URL}/rest/v1/rpc/match_resource_chunks",
+                rpc_endpoint,
                 headers=headers,
                 json=rpc_body,
                 timeout=15,
             )
             if rpc_resp.status_code == 200:
                 vector_results = _safe_json_list(rpc_resp)
+                if chapter_id:
+                    active_model = (EMBED_MODEL or ACTIVE_EMBEDDING_MODEL).strip()
+                    vector_results = [
+                        result for result in vector_results
+                        if result.get("embedding_model") == active_model
+                    ]
                 vector_ok = True
                 if chunk_type:
                     vector_results = [
@@ -1654,6 +1913,9 @@ def hybrid_search(
             resource_id=resource_id,
             chunk_type=chunk_type,
             resource_ids=spec_resource_ids,
+            chapter_id=chapter_id,
+            source_types=source_types,
+            target_spec_refs=spec_refs,
         )
         relational_ok = relational_ok or lex_ok
 
@@ -1758,13 +2020,18 @@ def hybrid_search(
             r["similarity"] = 0.0
             merged[chunk_id] = r
 
-    # Sort: boosted first, then by similarity descending
+    # Sort: boosted first, then by similarity descending with deterministic tie-breakers
     final = sorted(
         merged.values(),
-        key=lambda x: (x.get("boosted", False), x.get("similarity") or 0.0),
-        reverse=True,
+        key=lambda x: (
+            not x.get("boosted", False),
+            -(x.get("similarity") or 0.0),
+            int(x["chunk_index"]) if x.get("chunk_index") is not None else 10**9,
+            str(x.get("id") or ""),
+        ),
     )
     final = final[:match_count]
+    assign_canonical_citation_labels(final)
 
     return {
         "query": query,
