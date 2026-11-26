@@ -16,8 +16,10 @@ The platform contains multiple specialised AI personas. Each has a defined respo
 - Always Socratic — asks guiding questions rather than giving direct answers
 - Uses retrieved curriculum context (RAG) to ground all responses
 - Adapts explanation complexity based on student responses
-- Cites sources with compact labels (SRC-A12, EQ-03, etc.)
+- Cites sources with compact labels (SRC-A12, EQ-03, FIG-04, BLK-01, PRC-01, EXM-01, etc.)
 - Detects and addresses misconceptions
+- Receives structured live context (tapped graph points/calipers, Guided Practice items, and Simulation trials) via `LearningContext.interactive_state` ([ADR-0002](../adr/0002-direct-context-and-model-tagged-rag.md))
+- Coaches practical debriefs using the Edexcel AO3 **VMR (Vary, Measure, Repeat)** framework ([ADR-0004](../adr/0004-client-side-physics-sim-and-vmr-debrief.md))
 
 ---
 
@@ -77,6 +79,10 @@ Every response must include compact citations.
 - `FIG-04` — Figure/asset 04
 - `EQ-03` — Equation 03
 - `TAB-01` — Table 01
+- `BLK-01` — Learning Block chunk 01
+- `PRC-01` — Practical method chunk 01
+- `EXM-01` — Examiner Alert chunk 01
+- `WE-02` — Worked Example chunk 02
 
 **Display rules:**
 - Students see compact references as clickable chips

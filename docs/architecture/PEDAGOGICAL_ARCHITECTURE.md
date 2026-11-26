@@ -50,6 +50,19 @@ Quiz
 
 Specification Points support every layer but do not replace the learning hierarchy. They exist primarily for curriculum traceability.
 
+### Canonical Domain Vocabulary
+
+| Canonical Term | Scope & Boundary |
+|---|---|
+| **Learning Block** | One vertical, self-contained solo-student unit inside a Lesson (`4` blocks in Ch. 1 covering specs `1.3–1.10`). |
+| **Self-Check** (`Mini Quiz`) | Low-stakes inline retrieval check at the close of a block; `<80%` opens a calm inline solo remediation card rather than hard-locking progress. |
+| **Guided Practice** | Step-by-step `I Do / We Do / You Do` worked examples inside a Learning Block. |
+| **Worksheet** | The PDF + OpenKB practice surface (`HybridDocumentViewer` tab), distinct from Guided Practice. |
+| **Practical** | Curriculum/domain surface for required experimental investigations (e.g. Spec `1.5`). |
+| **Simulation** | Interactive physics canvas/widget embedded inside a Practical or Learning Block. |
+| **Examiner Alert** | Verbatim Edexcel examiner report warning surfaced on Guided Practice / Worksheet items and indexed into RAG. |
+| **Resource** | Unified database/RAG parent spine (`resources` table typed by `resource_type`) backing `resource_chunks`. |
+
 ---
 
 ## Learning Blocks
@@ -61,19 +74,18 @@ Every lesson is divided into small blocks. Each block has:
 3. **Examples** — Concrete instances of the concept
 4. **Analogy** — Familiar context to reduce cognitive load
 5. **Mini Activity** — Active engagement with the content
-6. **Reflection** — Metacognitive pause
-7. **Mini Quiz** — Low-stakes retrieval practice
-8. **Completion** — Progress checkpoint
+6. **Reflection** — Metacognitive pause (1-line prompt)
+7. **Self-Check (Mini Quiz)** — Low-stakes retrieval practice (with calm `<80%` solo remediation)
+8. **Completion** — Soft-gated progress checkpoint
 
 ---
 
-## Progress
+## Progress & Practical Debrief
 
-- Students complete blocks
-- Blocks unlock progress
-- Progress unlocks achievements
-- Achievements encourage motivation
-- Progress should reward frequent success rather than delayed completion
+- Students complete blocks freely (soft-gated — no hard locks, streaks, or confetti; see [ADR-0003](../adr/0003-calm-xp-on-student-block-progress.md))
+- Quiet header tracking shows blocks completed, spec objectives, and flat per-block XP (`student_block_progress.xp_awarded`)
+- Single-source Marp `.md` authoring rules are defined in [ADR-0001](../adr/0001-marp-single-authoring-source.md)
+- **VMR Practical Debrief:** Every practical Simulation concludes with a structured **Vary, Measure, Repeat** Edexcel AO3 debrief coached by the AI Tutor ([ADR-0004](../adr/0004-client-side-physics-sim-and-vmr-debrief.md))
 
 ---
 

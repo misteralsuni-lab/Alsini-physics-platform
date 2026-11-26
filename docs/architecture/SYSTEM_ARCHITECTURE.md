@@ -49,12 +49,13 @@
 │  /api/resources/{id}/assets/{type} → Filtered assets            │
 │                                                                  │
 │  RAG Pipeline:                                                   │
-│    _embed_query() → NVIDIA NV-EmbedQA-E5-V5 (1024-dim)          │
-│    match_resource_chunks RPC → pgvector cosine similarity         │
+│    _embed_query() → nvidia/nemotron-3.5-embed-1b (1024-dim)      │
+│    match_resource_chunks RPC → pgvector cosine + lexical fallback│
 │    _format_chunks_as_context() → compact string (~500 chars)      │
 │    _chunks_to_sources() → TutorSource[] with citations           │
 │                                                                  │
-│  Model routing: evaluate_routing() → NVIDIA Llama 3.3 or Gemini  │
+│  Model routing: OpenCode Zen → NVIDIA NIM → Gemini 2.5 Flash     │
+│  Auth & CORS: Supabase Bearer JWT + explicit origin allowlist    │
 │                                                                  │
 │  — Legacy Express server (port 5000) available but deprecated — │
 └──────────────────────────┬───────────────────────────────────────┘
@@ -98,7 +99,7 @@
 | Math Rendering | KaTeX | Latest |
 | Backend (primary) | FastAPI + Uvicorn | Python 3.x |
 | Backend (legacy) | Express.js | Node.js |
-| AI Models | NVIDIA Llama 3.3, Gemini 2.5 Flash, NVIDIA NV-EmbedQA-E5-V5 | — |
+| AI Models | OpenCode Zen (`deepseek-v4.1-flash-free`), NVIDIA NIM (`nemotron-3.5-super-vl-120b-a12b` / `nemotron-3.5-bolt-e4b`), Gemini 2.5 Flash, `nvidia/nemotron-3.5-embed-1b` | — |
 | Database | PostgreSQL (via Supabase) | Latest |
 | Vector Search | pgvector (HNSW, cosine, 1024-dim) | Latest |
 | Storage | Supabase Storage (S3-compatible) | Latest |
@@ -175,8 +176,11 @@ Worksheet render → GET /api/resources/{id}/assets
 | `SUPABASE_URL` | Backend | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend | Service role key for ingest pipelines |
 | `NVIDIA_API_KEY` | Backend | NVIDIA NIM + embedding API |
-| `GEMINI_API_KEY` | Backend | Google Gemini API |
-| `FRONTEND_URL` | Backend | CORS allowed origin (production) |
+| `NVIDIA_EMBED_MODEL` | Backend | Active embedding model (`nvidia/nemotron-3.5-embed-1b`) |
+| `OPENCODE_ZEN_API_KEY` | Backend | Primary OpenCode Zen LLM tier |
+| `GEMINI_API_KEY` | Backend | Google Gemini API (fallback tier) |
+| `FRONTEND_URL` | Backend | Primary allowed CORS origin |
+| `CORS_ORIGINS` | Backend | Comma-separated CORS origin allowlist (no wildcard) |
 
 ---
 
@@ -186,7 +190,8 @@ Worksheet render → GET /api/resources/{id}/assets
 2. **FastAPI supplants Express** — port 8000 is primary AI backend; port 5000 is legacy
 3. **Supabase Storage for assets** — no local filesystem, public CDN URLs
 4. **No SDK, REST-only** — `requests` library for Supabase API (matches existing pattern)
-5. **RLS-first** — data access filtered at DB level per `auth.uid()`
-6. **Focus state as single source of truth** — syncs SearchPanel → viewer → tutor
-7. **Non-fatal RAG** — tutor still answers if embedding/RPC fails (degraded quality)
-8. **Compact citation labels** — SRC-A12, EQ-03, FIG-04, TAB-02; expandable in dev mode
+5. **RLS-first + Bearer JWT auth** — `/api/*` requires a valid Supabase access token (`get_current_user`); DB access filtered per `auth.uid()`
+6. **`LearningContext` as single carrier** — syncs viewer, SearchPanel, and interactive widgets into `/api/tutor` (see [ADR-0002](../adr/0002-direct-context-and-model-tagged-rag.md))
+7. **Resilient hybrid RAG** — vector cosine search falls back deterministically to PostgREST lexical search when embeddings fail or mismatch
+8. **Compact citation labels** — `SRC-`, `EQ-`, `FIG-`, `TAB-`, `QN-` (plus `BLK-`, `PRC-`, `EXM-`, `WE-` in Ch. 1); expandable in dev mode
+9. **Architecture Decision Records** — see [docs/adr/](../adr/) (`0001`–`0004`) for Chapter 1 Vertical Slice decisions

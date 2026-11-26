@@ -17,19 +17,19 @@ PDF
   ↓
 Semantic Parser (PyMuPDF + master_ingestion.py)
   ↓
-Structured JSON (OpenKB knowledge graph)
+Structured JSON / Marp Lesson Blocks (`content/lessons/`)
   ↓
-Chunking (embedding_pipeline.py — by node type)
+Chunking (`embedding_pipeline.py` — by node / block / practical / alert type)
   ↓
-Embedding (NVIDIA NV-EmbedQA-E5-V5, 1024-dim)
+Embedding (`nvidia/nemotron-3.5-embed-1b`, 1024-dim)
   ↓
-pgvector (resource_chunks table, HNSW index)
+pgvector (`resource_chunks` table, HNSW index, `embedding_model` tagged)
   ↓
-Hybrid Search (vector cosine similarity + relational/keyword)
+Hybrid Search (model-matched vector cosine similarity + PostgREST lexical fallback)
   ↓
-Context Assembly (top-5 chunks + figures + formulas + metadata)
+Context Assembly (top-5 chunks + grounded asset/interactive context + metadata)
   ↓
-LLM (NVIDIA Llama 3.3 or Gemini 2.5 Flash)
+LLM (`OpenCode Zen → NVIDIA NIM → Gemini 2.5 Flash` fallback chain)
   ↓
 Student (response with compact citations)
 ```
@@ -56,8 +56,11 @@ Uses:
 | Formula | Equation with variables defined | EQ-03 |
 | Definition | Precise term definition | SRC-D12 |
 | Relationship | How concepts relate | SRC-R07 |
-| Question | Practice question | Q-04 |
-| Worked Example | Step-by-step solution | WE-02 |
+| Question | Practice question | QN-04 |
+| Worked Example | Step-by-step guided solution | WE-02 |
+| Learning Block | Marp lesson block exposition/analogy | BLK-01 |
+| Practical Method | Spec practical setup & variables | PRC-01 |
+| Examiner Alert | Verbatim examiner report warning | EXM-01 |
 | Figure | Reference to diagram/graph | FIG-04 |
 | Table | Reference to data table | TAB-01 |
 
@@ -142,12 +145,19 @@ Expanded: Resource: Forces and Motion (5729d034-...)
 
 | Component | Implementation |
 |-----------|---------------|
-| Embedding model | NVIDIA NV-EmbedQA-E5-V5 (1024-dim) |
+| Embedding model | `nvidia/nemotron-3.5-embed-1b` (1024-dim, tracked via `embedding_model` in ADR-0002) |
 | Vector index | pgvector HNSW (m=16, ef_construction=200) |
 | Distance metric | Cosine similarity |
-| Match count | 5 chunks per query (configurable) |
-| Fallback | Empty context → tutor answers without retrieval |
+| Match count | 5 chunks per query (configurable; chapter-scoped via `match_chapter_chunks` planned in ADR-0002) |
+| Fallback | Deterministic PostgREST lexical search when vector embedding fails or model mismatches; empty context → ungrounded notice |
 | History | Conversation history passed separately (not RAG'd) |
+
+---
+
+## Related ADRs
+
+- [ADR-0001: Marp Markdown as Single Authoring Source of Truth](../adr/0001-marp-single-authoring-source.md)
+- [ADR-0002: Direct Structured Context and Model-Tagged Hybrid RAG](../adr/0002-direct-context-and-model-tagged-rag.md)
 
 ---
 

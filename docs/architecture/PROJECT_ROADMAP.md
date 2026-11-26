@@ -51,7 +51,7 @@ A modern, open-access physics education VLE with an AI tutor, RAG-powered retrie
 
 - `resource_chunks` table with `vector(1024)` + HNSW index
 - `match_resource_chunks` RPC for pgvector cosine similarity
-- NVIDIA NV-EmbedQA-E5-V5 embedding pipeline
+- `nvidia/nemotron-3.5-embed-1b` (`1024-dim`) embedding pipeline (in-place re-embedding completed in `#11`)
 - Hybrid search endpoints (pure vector + relational merge)
 - SearchPanel frontend component with chunk-type filters
 
@@ -100,8 +100,9 @@ A modern, open-access physics education VLE with an AI tutor, RAG-powered retrie
 | RAG tutor | ✅ Complete |
 | Regression suite | 🔶 Partial (check 5 hangs) |
 | Quiz engine | 🔶 Basic implementation needs expansion |
-| Lesson experience | ❌ Not started |
-| Progress tracking | ❌ Not started |
+| Lesson experience | 📋 Planned (Ch. 1 Vertical Slice: `#13`, `#14`; see [PRD](../prd/chapter-1-vertical-slice.md)) |
+| Practical simulation | 📋 Planned (Ch. 1 Spec 1.5 + VMR debrief: `#15`; see [PRD](../prd/chapter-1-vertical-slice.md)) |
+| Progress tracking | 📋 Planned (RLS `student_block_progress`: `#13`, `#14`) |
 | Teacher analytics | ❌ Not started |
 | Adaptive tutoring | ❌ Not started |
 
@@ -118,14 +119,13 @@ A modern, open-access physics education VLE with an AI tutor, RAG-powered retrie
 
 ## Medium-Term (Production Readiness)
 
-- Lock down CORS (`FRONTEND_URL` env var, no wildcard)
+- ✅ CORS allowlist locked down (`FRONTEND_URL` / `CORS_ORIGINS` env vars in `backend/main.py`, no wildcard)
 - Rate limiting on `/api/tutor` (`slowapi` for FastAPI)
-- Automated tests: `vitest` for citation chips, `pytest` for retrieval
+- Automated tests: `vitest` for citation chips & pure kinematics/physics math, `pytest` for retrieval
 - Remove/archive Express `server.js` (port 5000 dead code)
 - Populate `resource_assets.linked_question_id` from semantic JSON
-- Lesson experience implementation (Learning Blocks)
-- Quiz experience expansion
-- Progress tracking system
+- Chapter 1 Vertical Slice (`1.3–1.10`) — Wayfinder issues `#13` (Marp parser + schema + unified RAG), `#14` (Learning Block player + touchable graphs), `#15` (Spec 1.5 simulation + VMR debrief)
+- Quiz experience expansion (`/api/grade` RAG migration + `/api/question` Chapter 1 bank — deferred follow-up)
 
 ---
 
@@ -148,10 +148,9 @@ A modern, open-access physics education VLE with an AI tutor, RAG-powered retrie
 
 | Debt | Impact | Target Session |
 |------|--------|---------------|
-| `/api/grade` still uses full-context (not RAG) | Prompt bloat, no citations | Short-term |
+| `/api/grade` still uses full-context (not RAG) & `/api/question` is hardcoded | Prompt bloat, no citations, single sample question | Follow-up ticket (deferred from Ch. 1 Vertical Slice) |
 | `source_refs.page` is None for most chunks | No PDF page jumping | Short-term |
 | Playwright check 5 hangs | Incomplete test coverage | Short-term |
-| CORS wildcard in production | Security risk | Medium-term |
 | Express `server.js` is dead code | Maintenance burden | Medium-term |
 | Bundle is 1.1MB (no code-splitting) | Slow initial load | Long-term |
 
