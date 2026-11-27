@@ -286,6 +286,7 @@ def test_ch1_spec_1_5_practical_guide(ch1_lesson: ParsedLesson) -> None:
     assert "front" in md_lower and "car" in md_lower
     assert "50 hz" in md_lower
     assert "10-space" in md_lower
+    assert "0.20" in md_lower
     assert "0.02" in md_lower
 
 

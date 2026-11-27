@@ -105,7 +105,7 @@ size: 16:9
 
 > 📖 **Textbook:** ch. 1, pp. 9–12
 
-Demonstrate the ticker-timer bench setup (exemplar practical list): tape through the timer, trolley down the shallow ramp. Groups collect their own tape today; cutting into 10-space strips ($0.02$ s each at 50 Hz), building the d-t chart and converting to a v-t graph is next lesson's measured write-up.
+Demonstrate the ticker-timer bench setup (exemplar practical list): tape through the timer, trolley down the shallow ramp. Groups collect their own tape today; cutting into 10-space strips ($0.20$ s each at 50 Hz; 1 dot-space = $0.02$ s), building the d-t chart and converting to a v-t graph is next lesson's measured write-up.
 
 ---
 
