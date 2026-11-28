@@ -20,9 +20,9 @@ size: 16:9
 | Ref | Spec text |
 |---|---|
 | **1.3** | plot and explain distance-time graphs |
-| **1.4** | know and use the relationship between average speed, distance moved and time taken: $v = s/t$ |
+| **1.4** | know and use the relationship between average speed, distance moved and time taken: $v = \dfrac{s}{t}$ |
 | **1.5** | practical: investigate the motion of everyday objects such as toy cars or tennis balls |
-| **1.6** | know and use the relationship between acceleration, change in velocity and time taken: $a = (v - u)/t$ |
+| **1.6** | know and use the relationship between acceleration, change in velocity and time taken: $a = \dfrac{v - u}{t}$ |
 | **1.7** | plot and explain velocity-time graphs |
 | **1.8** | determine acceleration from the gradient of a velocity-time graph |
 | **1.9** | determine the distance travelled from the area between a velocity-time graph and the time axis |
@@ -45,8 +45,8 @@ size: 16:9
 
 | Term | Definition |
 |---|---|
-| **Average speed, $v$** | Distance moved divided by time taken: $v = s/t$; unit m/s. A **scalar**. |
-| **Acceleration, $a$** | Change in velocity divided by time taken: $a = (v - u)/t$; unit $m/s^2$. |
+| **Average speed, $v$** | Distance moved divided by time taken: $v = \dfrac{s}{t}$; unit m/s. A **scalar**. |
+| **Acceleration, $a$** | Change in velocity divided by time taken: $a = \dfrac{v - u}{t}$; unit $m/s^2$. |
 | **Gradient** | Steepness of a graph: distance-time gradient = speed; velocity-time gradient = acceleration. |
 | **Area under a v-t graph** | The distance travelled between the curve and the time axis. |
 | **Uniform acceleration** | Constant acceleration — the condition in which $v^2 = u^2 + (2 \times a \times s)$ applies. |
@@ -68,6 +68,18 @@ size: 16:9
 
 > 📖 **Textbook:** ch. 1, pp. 5–8
 
+<!-- student:foundation -->
+### Foundation: Motion Words Before Equations
+
+Before reading graphs or using equations, build a clear picture of four everyday motion ideas:
+
+- **Distance vs. Displacement:** Imagine walking one full loop around a classroom—say $24\text{ m}$—and stopping back at your starting mark. Your **distance** travelled (total path length) is $24\text{ m}$, while your **displacement** (straight-line change in position from start to finish) is $0\text{ m}$.
+- **Time ($t$):** Measures how long a motion takes, recorded in seconds (s).
+- **Speed vs. Velocity:** **Speed** tells you how fast an object moves regardless of direction (for example, $5$ m/s). **Velocity** is speed in a stated direction (for example, $5$ m/s East).
+- **Scalar vs. Vector:** Imagine guiding a blindfolded friend. Saying "walk $5\text{ m}$" gives only a **size (magnitude)**—that is a **scalar** (such as distance, time, and speed). Saying "walk $5\text{ m}$ East" gives both **magnitude and direction**—that is a **vector** (such as displacement and velocity).
+<!-- /student:foundation -->
+<!-- widget:scalar-vector-demo stage="foundation" demos="classroom-loop,blindfold-direction" -->
+
 - **Definition build** (3 min): sketch four d-t story shapes (rest, constant speed, speeding up, returning); gradient meaning in each.
 - **MWB Check (1 min) — Chunk 1 close:** "A toy car moves 4.5 m in 3.0 s at steady speed. Write its average speed." Answer: $1.5$ m/s.
 - **Decision gate**: <80% correct → re-teach gradient reading with a second graph; ≥80% → Chunk 2.
@@ -86,8 +98,8 @@ size: 16:9
 
 > 📖 **Textbook:** ch. 1, pp. 9–12
 
-- **Ramp measurement** (5 min, exemplar practical): trolley released from a fixed height on the bench ramp; time between two marked points measured twice; always time from the *front* of the car crossing the line (exemplar accuracy point). Compute $v = s/t$ for each run.
-- **Definition build** (3 min): acceleration as change in velocity per second; $a = (v - u)/t$; sign conventions for speeding up vs slowing down.
+- **Ramp measurement** (5 min, exemplar practical): trolley released from a fixed height on the bench ramp; time between two marked points measured twice; always time from the *front* of the car crossing the line (exemplar accuracy point). Compute $v = \dfrac{s}{t}$ for each run.
+- **Definition build** (3 min): acceleration as change in velocity per second; $a = \dfrac{v - u}{t}$; sign conventions for speeding up vs slowing down.
 - **MWB Check (2 min) — Chunk 2 close:** "A ball rolling down a slope gains speed from 1.0 m/s to 6.0 m/s in 2.5 s. Write its acceleration." Answer: $2.0$ $m/s^2$.
 - **Decision gate**: <80% → pair-reteach using the formula triangle; ≥80% → Chunk 3.
 
@@ -115,7 +127,7 @@ Demonstrate the ticker-timer bench setup (exemplar practical list): tape through
 
 ### Teacher models, narrating every step
 
-**Worked example** (2 min, from the lesson plan): runner covers $100$ m in $12.5$ s: $v = s/t = 100 / 12.5 = 8.0$ m/s.
+**Worked example** (2 min, from the lesson plan): runner covers $100$ m in $12.5$ s: $v = \dfrac{s}{t} = \dfrac{100}{12.5} = 8.0$ m/s.
 
 ---
 
@@ -167,7 +179,7 @@ Two acceleration questions, one requiring rearrangement for $t$.
 
 | Worked Example (Left) | Exam-Style Question (Right) |
 |---|---|
-| **Model:** runner covers $100$ m in $12.5$ s: $v = s/t = 100 / 12.5 = 8.0$ m/s. | **Exam-style (1.3):** find time given speed and distance (rearrangement practice — formula triangles allowed per exemplar differentiation note). |
+| **Model:** runner covers $100$ m in $12.5$ s: $v = \dfrac{s}{t} = \dfrac{100}{12.5} = 8.0$ m/s. | **Exam-style (1.3):** find time given speed and distance (rearrangement practice — formula triangles allowed per exemplar differentiation note). |
 
 ---
 
@@ -203,7 +215,7 @@ Two acceleration questions, one requiring rearrangement for $t$.
 
 | Worked Example (Left) | Exam-Style Question (Right) |
 |---|---|
-| **Plenary model:** *"A cyclist accelerates uniformly from 4.0 m/s to 12.0 m/s over a distance of 80 m. Calculate her acceleration."* **Answer**: $v^2 = u^2 + (2 \times a \times s)$ → $144 = 16 + 160a$, so $a = 0.80$ $m/s^2$. Require the $u$/$v$/$a$/$s$ list before substitution on every ticket. | **Exit ticket (1.10):** the same question, fresh context — attempt alone, mark with the model. |
+| **Plenary model:** *"A cyclist accelerates uniformly from 4.0 m/s to 12.0 m/s over a distance of 80 m. Calculate her acceleration."* **Answer**: $v^2 = u^2 + (2 \times a \times s)$ → $144 = 16 + 160a$, so $a = \dfrac{128}{160} = 0.80$ $m/s^2$. Require the $u$, $v$, $a$, $s$ list before substitution on every ticket. | **Exit ticket (1.10):** the same question, fresh context — attempt alone, mark with the model. |
 
 ---
 
@@ -230,8 +242,8 @@ Two acceleration questions, one requiring rearrangement for $t$.
 
 | Ref | Relationship |
 |---|---|
-| 1.4 | know and use the relationship between average speed, distance moved and time taken: $v = s/t$ |
-| 1.6 | know and use the relationship between acceleration, change in velocity and time taken: $a = (v - u)/t$ |
+| 1.4 | know and use the relationship between average speed, distance moved and time taken: $v = \dfrac{s}{t}$ |
+| 1.6 | know and use the relationship between acceleration, change in velocity and time taken: $a = \dfrac{v - u}{t}$ |
 | 1.10 | use the relationship between final speed, initial speed, acceleration and distance moved: $v^2 = u^2 + (2 \times a \times s)$ |
 
 ### Homework checklist

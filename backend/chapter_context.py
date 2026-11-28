@@ -89,7 +89,7 @@ _CANONICAL_FORMULAS: tuple[CanonicalFormula, ...] = (
         citation_label="EQ-CH1-01",
         name="Average speed",
         formula="v = s / t (average speed = distance moved / time taken)",
-        latex=r"v = \frac{s}{t}",
+        latex=r"v = \dfrac{s}{t}",
         units="v in m/s, s (distance) in m, t in s",
         spec_ref="1.4",
         notes="Average speed is a scalar quantity relating distance moved and time taken.",
@@ -99,7 +99,7 @@ _CANONICAL_FORMULAS: tuple[CanonicalFormula, ...] = (
         citation_label="EQ-CH1-02",
         name="Acceleration",
         formula="a = (v - u) / t (acceleration = change in velocity / time taken)",
-        latex=r"a = \frac{v - u}{t}",
+        latex=r"a = \dfrac{v - u}{t}",
         units="a in m/s^2, v (final velocity) and u (initial velocity) in m/s, t in s",
         spec_ref="1.6",
         notes="Positive for speeding up in the positive direction; negative for deceleration.",
@@ -119,7 +119,7 @@ _CANONICAL_FORMULAS: tuple[CanonicalFormula, ...] = (
         citation_label="EQ-CH1-04",
         name="Gradient of a distance-time graph",
         formula="speed = gradient = delta_d / delta_t",
-        latex=r"\text{speed} = \frac{\Delta d}{\Delta t}",
+        latex=r"\text{speed} = \dfrac{\Delta d}{\Delta t}",
         units="speed in m/s, delta_d in m, delta_t in s",
         spec_ref="1.3",
         notes="Horizontal line indicates rest; straight line indicates constant speed; curve indicates changing speed.",
@@ -129,7 +129,7 @@ _CANONICAL_FORMULAS: tuple[CanonicalFormula, ...] = (
         citation_label="EQ-CH1-05",
         name="Gradient of a velocity-time graph",
         formula="acceleration = gradient = delta_v / delta_t",
-        latex=r"a = \frac{\Delta v}{\Delta t}",
+        latex=r"a = \dfrac{\Delta v}{\Delta t}",
         units="a in m/s^2, delta_v in m/s, delta_t in s",
         spec_ref="1.8",
         notes="Positive slope is acceleration, zero slope is constant velocity, negative slope is deceleration.",
@@ -803,7 +803,7 @@ def build_interactive_state_preamble(
         parts.append(
             f"  Verified governing formula [{resolved_formula.citation_label}] "
             f"(Spec {resolved_formula.spec_ref} — {resolved_formula.name}): "
-            f"{resolved_formula.formula} | Units: {resolved_formula.units}"
+            f"{resolved_formula.formula} | LaTeX: ${resolved_formula.latex}$ | Units: {resolved_formula.units}"
         )
 
     return "\n".join(parts) + "\n\n"

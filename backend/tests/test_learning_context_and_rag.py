@@ -961,3 +961,78 @@ class TestDeferralsAndHybridSearch:
         assert rpc_calls[0][1]["filter_embedding_model"] == ACTIVE_EMBEDDING_MODEL
         body = resp.json()
         assert body["results"][0]["citation_label"] == "EXM-1"
+
+
+# ===========================================================================
+# 6. Run 1 — Stacked \dfrac & ZPD-Calibrated Socratic Tutor Prompt Rules
+# ===========================================================================
+
+
+class TestTutorPedagogyAndDfracRules:
+    def test_tutor_system_prompt_enforces_stacked_dfrac_and_zpd_socratic_hints(self, authed_client):
+        captured_prompts: list[str] = []
+
+        def _fake_llm(history, user_prompt, system_prompt, **kwargs):
+            captured_prompts.append(system_prompt)
+            return "What two quantities do we know first? Try $v = \\dfrac{s}{t}$ [EQ-CH1-01].", "MOCK_MODEL"
+
+        with (
+            patch.object(main_mod, "_retrieve_relevant_chunks", return_value=[]),
+            patch.object(main_mod, "_enrich_chunks_with_resource_meta"),
+            patch.object(main_mod, "_call_llm_with_fallback", side_effect=_fake_llm),
+        ):
+            resp = authed_client.post(
+                "/api/tutor",
+                json={
+                    "student_prompt": "How do I rearrange acceleration to find time?",
+                    "learning_context": {
+                        "chapter_id": CHAPTER_1_ID,
+                        "interactive_state": {
+                            "mode": "lesson",
+                            "block_slug": "motion-practical-and-acceleration",
+                            "spec_refs": ["1.6"],
+                            "formula_ref": "ch1.acceleration",
+                        },
+                    },
+                },
+            )
+
+        assert resp.status_code == 200
+        assert len(captured_prompts) == 1
+        prompt = captured_prompts[0]
+
+        # Stacked Fractions Only rule
+        assert "Stacked Fractions Only" in prompt
+        assert r"\dfrac{numerator}{denominator}" in prompt
+        assert "$$ ... $$" in prompt
+        assert "never slash notation like s/t or (v-u)/t" in prompt
+        assert "m/s" in prompt
+
+        # ZPD-Calibrated Socratic Hints rule
+        assert "ZPD-Calibrated Socratic Hints" in prompt
+        assert "smallest helpful nudge" in prompt
+        assert "$u, v, a, s, t$" in prompt
+        assert "formula-triangle" in prompt
+
+        # Allowlisted formula preamble also carries \dfrac LaTeX
+        assert r"\dfrac{v - u}{t}" in prompt
+
+    def test_chapter1_formula_allowlist_uses_dfrac_for_all_fraction_formulas(self):
+        fraction_keys = (
+            "ch1.average_speed",
+            "ch1.acceleration",
+            "ch1.dt_gradient",
+            "ch1.vt_gradient",
+        )
+        for key in fraction_keys:
+            latex = CHAPTER1_FORMULA_ALLOWLIST[key].latex
+            assert r"\dfrac{" in latex, f"Expected \\dfrac in {key}: {latex}"
+            assert r"\frac{" not in latex
+
+        formula = resolve_formula_ref("ch1.average_speed")
+        assert formula is not None
+        preamble = build_interactive_state_preamble(
+            InteractiveState(mode="lesson", formula_ref="ch1.average_speed"),
+            resolved_formula=formula,
+        )
+        assert r"\dfrac{s}{t}" in preamble

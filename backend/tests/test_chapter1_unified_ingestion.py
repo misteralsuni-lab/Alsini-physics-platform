@@ -946,3 +946,28 @@ def test_secret_redaction_on_embedding_failure():
         )
     assert secret not in str(exc_info.value)
     assert "[REDACTED]" in str(exc_info.value)
+
+
+def test_real_marp_deck_bundle_includes_foundation_dfrac_and_strict_spec_boundary():
+    from pipeline.marp_parser import parse_marp_lesson
+
+    slides_path = _REPO_ROOT / "content" / "lessons" / "G9-T1-W1-movement-and-position-slides.md"
+    parsed = parse_marp_lesson(slides_path, enforce_chapter1_boundary=True)
+    bundle = ing.build_chapter1_ingestion_bundle(parsed)
+
+    assert bundle.lesson["spec_refs"] == ["1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "1.10"]
+    assert "1.1" not in bundle.lesson["spec_refs"]
+    assert "1.13" not in bundle.lesson["spec_refs"]
+
+    b1 = bundle.learning_blocks[0]
+    assert b1["spec_refs"] == ["1.3", "1.4"]
+    assert b1["metadata"]["has_foundation"] is True
+    assert "displacement" in (b1["metadata"]["foundation"] or "").lower()
+    assert b1["sections"][0]["kind"] == "foundation"
+    assert any(w["widget_type"] == "scalar-vector-demo" for w in b1["widgets"])
+
+    combined_chunks = "\n".join(c["chunk_text"] for c in bundle.chunks)
+    assert r"\dfrac{s}{t}" in combined_chunks
+    assert r"\dfrac{v - u}{t}" in combined_chunks
+    assert r"\dfrac{100}{12.5}" in combined_chunks
+    assert "0.20" in combined_chunks

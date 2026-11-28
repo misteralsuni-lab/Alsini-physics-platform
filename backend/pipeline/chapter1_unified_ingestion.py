@@ -424,6 +424,9 @@ def _build_block_chunk_text(block: Any, spec_refs: list[str]) -> str:
             parts.append("Learning objectives:\n" + "\n".join(obj_lines))
 
     student_md = str(_get_attr(block, "student_markdown") or "").strip()
+    foundation = str(_get_attr(block, "foundation") or "").strip()
+    if foundation and foundation not in student_md:
+        parts.append(f"Stage 1 Foundation (prerequisite):\n{foundation}")
     if student_md:
         parts.append(student_md)
 
@@ -813,6 +816,7 @@ def build_chapter1_ingestion_bundle(
         b_citation = block_citation_by_index[b_idx]
         b_specs = validated_block_specs[b_idx]
         reflections = [str(r).strip() for r in (_get_attr(block, "reflections") or []) if str(r).strip()]
+        foundation_text = str(_get_attr(block, "foundation") or "").strip()
 
         learning_block_rows.append(
             {
@@ -844,6 +848,8 @@ def build_chapter1_ingestion_bundle(
                     ),
                     "source_slides": list(_get_attr(block, "source_slides") or []),
                     "reflections": reflections,
+                    "foundation": foundation_text or None,
+                    "has_foundation": bool(foundation_text),
                 },
             }
         )

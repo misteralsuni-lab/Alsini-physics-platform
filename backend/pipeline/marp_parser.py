@@ -15,6 +15,7 @@ Key responsibilities (ADR-0001 & PRD Chapter 1 Vertical Slice):
 4. Convert ``Gate:`` / ``Decision gate:`` lines into structured, soft-gated
    ``<80%`` solo remediation items (never classroom re-teach or hard locks).
 5. Parse progressive zero-render HTML comment directives:
+   - ``<!-- student:foundation ... -->`` (inline or paired block)
    - ``<!-- student:analogy ... -->`` (inline or paired block)
    - ``<!-- student:reflection ... -->`` (inline or paired block)
    - ``<!-- widget:<type> ... -->``
@@ -184,7 +185,7 @@ class BlockSection:
     heading: str
     body: str
     slide_number: int
-    kind: str = "concept"  # "starter" | "concept" | "practical" | "practice" | "synthesis"
+    kind: str = "concept"  # "foundation" | "starter" | "concept" | "practical" | "practice" | "synthesis"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -253,6 +254,7 @@ class LearningBlock:
     widgets: list[WidgetDirective] = field(default_factory=list)
     examiner_alerts: list[ExaminerAlert] = field(default_factory=list)
     source_slides: list[int] = field(default_factory=list)
+    foundation: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -293,6 +295,7 @@ class SlideDirectives:
     widgets: list[WidgetDirective] = field(default_factory=list)
     is_teacher_only_slide: bool = False
     had_teacher_only_content: bool = False
+    foundations: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +437,12 @@ _TEACHER_ONLY_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 
+_FOUNDATION_RE = re.compile(
+    r"<!--\s*student:foundation\s*-->([\s\S]*?)<!--\s*(?:/student:foundation|end[-:\s]?student:foundation)\s*-->"
+    r"|<!--\s*student:foundation\b\s*(?::\s*|\s+)(?!\s*-->)([\s\S]*?)-->",
+    re.IGNORECASE,
+)
+
 _ANALOGY_RE = re.compile(
     r"<!--\s*student:analogy\s*-->([\s\S]*?)<!--\s*(?:/student:analogy|end[-:\s]?student:analogy)\s*-->"
     r"|<!--\s*student:analogy\b\s*(?::\s*|\s+)(?!\s*-->)([\s\S]*?)-->",
@@ -528,7 +537,19 @@ def extract_directives(slide_text: str, slide_number: int = 0) -> SlideDirective
             )
         text = before
 
-    # 4. <!-- student:analogy --> (single pass preserving document order)
+    # 4. <!-- student:foundation --> (single pass preserving document order & Markdown formatting)
+    foundations: list[str] = []
+
+    def _collect_foundation(match: re.Match[str]) -> str:
+        raw_val = match.group(1) if match.group(1) is not None else match.group(2)
+        content = strip_teacher_choreography(_collapse_blank_lines((raw_val or "").strip()))
+        if content:
+            foundations.append(content)
+        return ""
+
+    text = _FOUNDATION_RE.sub(_collect_foundation, text)
+
+    # 5. <!-- student:analogy --> (single pass preserving document order)
     analogies: list[str] = []
 
     def _collect_analogy(match: re.Match[str]) -> str:
@@ -540,7 +561,7 @@ def extract_directives(slide_text: str, slide_number: int = 0) -> SlideDirective
 
     text = _ANALOGY_RE.sub(_collect_analogy, text)
 
-    # 5. <!-- student:reflection --> (single pass preserving document order)
+    # 6. <!-- student:reflection --> (single pass preserving document order)
     reflections: list[str] = []
 
     def _collect_reflection(match: re.Match[str]) -> str:
@@ -552,7 +573,7 @@ def extract_directives(slide_text: str, slide_number: int = 0) -> SlideDirective
 
     text = _REFLECTION_RE.sub(_collect_reflection, text)
 
-    # 6. <!-- widget:<type> ... -->
+    # 7. <!-- widget:<type> ... -->
     widgets: list[WidgetDirective] = []
 
     def _collect_widget(match: re.Match[str]) -> str:
@@ -570,13 +591,13 @@ def extract_directives(slide_text: str, slide_number: int = 0) -> SlideDirective
 
     text = _WIDGET_RE.sub(_collect_widget, text)
 
-    # 7. Strip any remaining zero-render HTML comments from student output
+    # 8. Strip any remaining zero-render HTML comments from student output
     text = _ANY_HTML_COMMENT_RE.sub("", text)
     text = _collapse_blank_lines(text).strip()
 
     # If the slide contained only teacher-only content and nothing substantive remains
     if had_teacher_only and not _has_substantive_student_content(text) and not (
-        analogies or reflections or widgets
+        analogies or reflections or widgets or foundations
     ):
         is_teacher_only_slide = True
 
@@ -587,6 +608,7 @@ def extract_directives(slide_text: str, slide_number: int = 0) -> SlideDirective
         widgets=widgets,
         is_teacher_only_slide=is_teacher_only_slide,
         had_teacher_only_content=had_teacher_only,
+        foundations=foundations,
     )
 
 
@@ -965,7 +987,7 @@ def _parse_examiner_source(source_citation: str) -> tuple[str, str, str]:
 def _infer_vocab_specs(term: str, definition: str, allowed_specs: set[str]) -> list[str]:
     combined = f"{term} {definition}".lower()
     specs: list[str] = []
-    if "average speed" in combined or "v = s/t" in combined:
+    if "average speed" in combined or "v = s/t" in combined or r"\dfrac{s}{t}" in combined:
         specs.extend(["1.3", "1.4"])
     if "acceleration" in combined and "uniform acceleration" not in combined:
         specs.append("1.6")
@@ -1091,6 +1113,7 @@ def parse_marp_markdown(
     block_reflections: dict[int, list[str]] = {b.block_index: [] for b in CHAPTER_1_BLOCK_SPECS}
     block_widgets: dict[int, list[WidgetDirective]] = {b.block_index: [] for b in CHAPTER_1_BLOCK_SPECS}
     block_slides: dict[int, list[int]] = {b.block_index: [] for b in CHAPTER_1_BLOCK_SPECS}
+    block_foundations: dict[int, list[tuple[str, int]]] = {b.block_index: [] for b in CHAPTER_1_BLOCK_SPECS}
 
     # Practical Guide accumulators (Spec 1.5)
     practical_methods: list[PracticalMethod] = []
@@ -1219,6 +1242,7 @@ def parse_marp_markdown(
             block_analogies[1].extend(directives.analogies)
             block_reflections[1].extend(directives.reflections)
             block_widgets[1].extend(directives.widgets)
+            block_foundations[1].extend((f, slide_number) for f in directives.foundations)
             continue
 
         # --- Learning Objectives slide ---
@@ -1240,6 +1264,7 @@ def parse_marp_markdown(
             block_analogies[1].extend(directives.analogies)
             block_reflections[1].extend(directives.reflections)
             block_widgets[1].extend(directives.widgets)
+            block_foundations[1].extend((f, slide_number) for f in directives.foundations)
             continue
 
         # --- Key Vocabulary slide ---
@@ -1320,7 +1345,10 @@ def parse_marp_markdown(
                         ex_title="Worked Example: Average Speed",
                         prompt="A runner covers 100 m in 12.5 s. Calculate the average speed.",
                         solution=re.sub(r"^\*\*Model:\*\*\s*", "", left_clean, flags=re.IGNORECASE),
-                        steps=["Identify distance s = 100 m and time t = 12.5 s.", "Apply v = s/t = 100 / 12.5 = 8.0 m/s."],
+                        steps=[
+                            "Identify distance s = 100 m and time t = 12.5 s.",
+                            r"Apply $v = \dfrac{s}{t} = \dfrac{100}{12.5} = 8.0$ m/s.",
+                        ],
                         spec_refs=["1.3", "1.4"],
                         slide_number=slide_number,
                     )
@@ -1467,6 +1495,7 @@ def parse_marp_markdown(
         block_analogies[target_block].extend(directives.analogies)
         block_reflections[target_block].extend(directives.reflections)
         block_widgets[target_block].extend(directives.widgets)
+        block_foundations[target_block].extend((f, slide_number) for f in directives.foundations)
 
         # --- Extract Gate / Decision gate lines from this slide ---
         slide_remediations: list[SoloRemediation] = []
@@ -1533,13 +1562,13 @@ def parse_marp_markdown(
                                 "Release the trolley or toy car from a fixed height on the bench ramp.",
                                 "Measure the distance s between two marked points along the ramp/bench.",
                                 "Time the trolley between the two marked points twice and calculate the mean time t.",
-                                "Calculate average speed for each run using v = s/t.",
+                                r"Calculate average speed for each run using $v = \dfrac{s}{t}$.",
                             ],
                             accuracy_notes=[
                                 "Always time from the front of the car crossing each marked line.",
                                 "Keep the release height constant for repeated runs and take repeat readings.",
                             ],
-                            measurements=["distance s (m)", "time t (s)", "average speed v = s/t (m/s)"],
+                            measurements=["distance s (m)", "time t (s)", r"average speed $v = \dfrac{s}{t}$ (m/s)"],
                             slide_number=slide_number,
                         )
                     )
@@ -1762,12 +1791,35 @@ def parse_marp_markdown(
             a for a in examiner_alerts if idx in a.block_indices
         ]
 
+        ordered_sections: list[BlockSection] = []
+        foundation_parts: list[str] = []
+        for f_text, f_slide in block_foundations[idx]:
+            foundation_parts.append(f_text)
+            f_lines = f_text.splitlines()
+            f_heading = "Stage 1 Foundation"
+            f_body_text = f_text
+            if f_lines:
+                h_match = re.match(r"^#{1,4}\s+(.+)$", f_lines[0].strip())
+                if h_match:
+                    f_heading = h_match.group(1).strip()
+                    f_body_text = "\n".join(f_lines[1:]).strip()
+            ordered_sections.append(
+                BlockSection(
+                    heading=f_heading,
+                    body=f_body_text or f_text,
+                    slide_number=f_slide,
+                    kind="foundation",
+                )
+            )
+        ordered_sections.extend(block_sections[idx])
+        foundation_text = _collapse_blank_lines("\n\n".join(foundation_parts)).strip()
+
         # Build clean, self-contained student_markdown for this Learning Block
         md_parts: list[str] = [f"## {blk_def.title}"]
         if blk_objectives:
             obj_lines = [f"- **{o.spec_ref}:** {o.text}" for o in blk_objectives]
             md_parts.append("### Learning Objectives\n" + "\n".join(obj_lines))
-        for sec in block_sections[idx]:
+        for sec in ordered_sections:
             if sec.heading and sec.heading.lower() != blk_def.title.lower():
                 md_parts.append(f"### {sec.heading}\n{sec.body}")
             else:
@@ -1785,7 +1837,7 @@ def parse_marp_markdown(
                 learning_objectives=blk_objectives,
                 vocabulary=blk_vocab,
                 student_markdown=student_markdown,
-                sections=block_sections[idx],
+                sections=ordered_sections,
                 guided_practice=block_examples[idx],
                 self_check=block_checks[idx],
                 solo_remediation=block_remediations[idx],
@@ -1794,6 +1846,7 @@ def parse_marp_markdown(
                 widgets=block_widgets[idx],
                 examiner_alerts=blk_alerts,
                 source_slides=block_slides[idx],
+                foundation=foundation_text,
             )
         )
 

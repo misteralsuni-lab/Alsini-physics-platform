@@ -73,6 +73,8 @@ def _collect_all_student_facing_text(lesson: ParsedLesson) -> str:
     parts: list[str] = []
     for block in lesson.blocks:
         parts.append(block.title)
+        if block.foundation:
+            parts.append(block.foundation)
         parts.append(block.student_markdown)
         for sec in block.sections:
             parts.append(sec.heading)
@@ -512,3 +514,90 @@ def test_extract_directives_teacher_only_slide_with_heading_only() -> None:
 def test_parse_marp_lesson_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         parse_marp_lesson(REPO_ROOT / "content" / "lessons" / "does-not-exist.md")
+
+
+# ---------------------------------------------------------------------------
+# 3. Run 1 — Block 1 Stage 1 Foundation & Stacked \dfrac Equations
+# ---------------------------------------------------------------------------
+
+
+def test_ch1_block1_foundation_intro_and_scalar_vector_widget(ch1_lesson: ParsedLesson) -> None:
+    b1 = ch1_lesson.blocks[0]
+
+    # Strict spec_refs boundary preserved (prerequisite foundation never adds 1.1 or 1.13)
+    assert ch1_lesson.spec_refs == ["1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "1.10"]
+    assert b1.spec_refs == ["1.3", "1.4"]
+    assert "1.1" not in ch1_lesson.spec_refs
+    assert "1.13" not in ch1_lesson.spec_refs
+
+    # Stage 1 Foundation section & field populated
+    assert b1.foundation.strip() != ""
+    assert b1.sections[0].kind == "foundation"
+
+    f_lower = b1.foundation.lower()
+    for term in ("distance", "displacement", "24", "time", "speed", "velocity", "scalar", "vector", "blindfold", "5"):
+        assert term in f_lower, f"Missing '{term}' in Block 1 foundation"
+
+    # Scalar-vector interactive widget directive extracted cleanly
+    assert any(
+        w.widget_type == "scalar-vector-demo" and w.config.get("stage") == "foundation"
+        for w in b1.widgets
+    )
+
+
+def test_ch1_stacked_dfrac_fractions_and_no_inline_slash_equations(ch1_lesson: ParsedLesson) -> None:
+    all_parts = [_collect_all_student_facing_text(ch1_lesson)]
+    all_parts.extend(o.text for o in ch1_lesson.learning_objectives)
+    all_parts.extend(f"{v.term} {v.definition}" for v in ch1_lesson.vocabulary)
+    all_parts.extend(f"{f.description} {f.expression}" for f in ch1_lesson.formulas)
+    if ch1_lesson.practical:
+        for method in ch1_lesson.practical.methods:
+            all_parts.extend(method.measurements)
+    combined = "\n".join(all_parts)
+
+    # Stacked \dfrac equations & worked calculation must be present
+    assert r"\dfrac{s}{t}" in combined
+    assert r"\dfrac{v - u}{t}" in combined
+    assert r"\dfrac{100}{12.5}" in combined
+    assert r"\dfrac{128}{160}" in combined
+
+    # Zero inline algebraic or numerical slash equations (e.g. s/t, (v - u)/t, 100 / 12.5)
+    assert not re.search(r"(?<![A-Za-z])s\s*/\s*t\b", combined)
+    assert not re.search(r"\(v\s*-\s*u\)\s*/\s*t\b", combined)
+    assert "100 / 12.5" not in combined
+
+    # Edexcel SI unit notation & Slide 9 0.20 s ticker-timer fix preserved
+    assert "m/s" in combined
+    assert "m/s^2" in combined
+    assert "0.20" in ch1_lesson.blocks[1].student_markdown
+    assert ch1_lesson.practical is not None
+    assert "0.20" in ch1_lesson.practical.student_markdown
+
+
+def test_synthetic_student_foundation_directive_and_choreography_stripping() -> None:
+    md = """---
+marp: true
+---
+
+# Theory Chunk 1 — Distance-time graphs (1.3, 1.4)
+
+<!-- student:foundation -->
+### Foundation: Distance vs Displacement
+Walk a full loop: distance is 24 m, displacement is 0 m.
+Hold up your boards and check with your partner.
+<!-- /student:foundation -->
+<!-- student:foundation: Inline foundation reminder on scalar vs vector. -->
+<!-- widget:scalar-vector-demo stage="foundation" -->
+
+Core lesson text.
+"""
+    lesson = parse_marp_markdown(md)
+    b1 = lesson.blocks[0]
+    assert "distance is 24 m" in b1.foundation
+    assert "Inline foundation reminder" in b1.foundation
+    assert "boards" not in b1.foundation.lower()
+    assert "partner" not in b1.foundation.lower()
+    assert "<!--" not in b1.foundation
+    assert b1.sections[0].kind == "foundation"
+    assert b1.sections[0].heading == "Foundation: Distance vs Displacement"
+    assert any(w.widget_type == "scalar-vector-demo" for w in b1.widgets)

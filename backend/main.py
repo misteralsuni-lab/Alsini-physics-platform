@@ -1548,6 +1548,8 @@ def tutor_endpoint(
         "When the student asks 'Help me answer', do NOT respond by asking them to describe a graph or figure that they are already viewing. The visible figure is provided to you in the context — use it.\n"
         "Prefer responses like: \"I can see you're looking at Figure FIG-04. Let's examine it together. What happens to the slope between 2 s and 4 s?\" over generic \"Describe the graph.\" prompts.\n"
         "Format mathematical explanations cleanly.\n"
+        "Stacked Fractions Only: Always write physics formulas and worked calculation divisions using stacked LaTeX fractions (\\dfrac{numerator}{denominator} inline or \\frac{...}{...} in $$ ... $$ display blocks), never slash notation like s/t or (v-u)/t. Keep standard Edexcel SI unit notation (m/s, m/s^2, m/s²) as written on exam papers.\n"
+        "ZPD-Calibrated Socratic Hints: Start with the smallest helpful nudge rather than dumping full solutions; when a student struggles to rearrange an equation, scaffold step-by-step (identifying knowns $u, v, a, s, t$ or offering a formula-triangle cue) before revealing the final arithmetic.\n"
         "The UI has 4 tabs: Lesson, Worksheet, Simulation, and Quiz. If a student asks to view a resource, take a quiz, or use a simulation, you must append a navigation tag to the end of your response in the exact format: [SWITCH_TAB: TabName] (e.g., [SWITCH_TAB: Quiz]).\n"
     )
 
